@@ -1,0 +1,63 @@
+import { ApiProperty } from '@nestjs/swagger'
+import { UserRole } from '@storage/database'
+import { Api } from '@storage/shared'
+import { IsEmail, IsEnum, IsOptional, IsString, MinLength } from 'class-validator'
+
+export namespace UsersDto {
+	export enum ErrorCodes {
+		USER_NOT_FOUND = 'user_not_found',
+		EMAIL_ALREADY_USED = 'email_already_used',
+		LAST_ADMIN = 'last_admin',
+	}
+
+	export class UserItem {
+		@ApiProperty({ type: 'string', format: 'uuid' })
+		declare guid: string
+
+		@ApiProperty({ type: 'string', format: 'email' })
+		declare email: string
+
+		@ApiProperty({ type: 'string', nullable: true, required: false })
+		declare name: string | null
+
+		@ApiProperty({ enum: UserRole })
+		declare role: UserRole
+
+		@ApiProperty({ type: 'string', format: 'date-time', nullable: true, required: false })
+		declare lastLoginAt: Date | null
+
+		@ApiProperty({ type: 'string', format: 'date-time' })
+		declare createdAt: Date
+	}
+
+	export class CreateUserBody {
+		@ApiProperty({ type: 'string', format: 'email' })
+		@IsEmail()
+		declare email: string
+
+		@ApiProperty({ type: 'string' })
+		@IsString()
+		@MinLength(8)
+		declare password: string
+
+		@ApiProperty({ type: 'string', required: false })
+		@IsOptional()
+		@IsString()
+		declare name?: string
+
+		@ApiProperty({ enum: UserRole })
+		@IsEnum(UserRole)
+		declare role: UserRole
+	}
+
+	export class SetPasswordBody {
+		@ApiProperty({ type: 'string' })
+		@IsString()
+		@MinLength(8)
+		declare password: string
+	}
+
+	export class UserNotFoundError extends Api.createErrorDto([ErrorCodes.USER_NOT_FOUND]) {}
+	export class CreateUserBadRequestError extends Api.createErrorDto([ErrorCodes.EMAIL_ALREADY_USED]) {}
+	export class DeleteUserBadRequestError extends Api.createErrorDto([ErrorCodes.LAST_ADMIN]) {}
+}

@@ -1,0 +1,5 @@
+export * from './s3.exception'
+export * from './s3.module'
+export * from './s3.signature.service'
+export * from './s3.types'
+export * from './s3.xml.service'

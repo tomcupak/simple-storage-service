@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+currentDir=$( pwd )
+
+tsx="$currentDir/node_modules/.bin/tsx"
+drizzleKit="$currentDir/node_modules/drizzle-kit/bin.cjs"
+
+read -p "Name your migration: " name
+
+cd libs/database/src/core
+
+$tsx $drizzleKit generate --name ${name}
+
+cd $currentDir

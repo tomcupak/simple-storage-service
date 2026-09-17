@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2021",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "useUnknownInCatchVariables": true,
+    "paths": {
+      "@storage/domains/*": ["libs/domains/src/*"],
+      "@storage/shared": ["libs/shared/src/index"],
+      "@storage/database": ["libs/database/src/index"]
+    }
+  },
+  "exclude": ["web"]
+}

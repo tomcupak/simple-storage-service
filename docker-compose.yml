@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: storage-postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres-init.sh:/docker-entrypoint-initdb.d/init.sh
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "10400:5432"
+    restart: on-failure
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: storage-redis
+    ports:
+      - "10401:6379"
+    command: [ "redis-server", "--appendonly", "yes" ]
+    restart: on-failure
+
+volumes:
+  postgres-data:

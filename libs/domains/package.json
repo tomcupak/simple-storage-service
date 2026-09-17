@@ -1,0 +1,10 @@
+{
+	"name": "@storage/domains",
+	"version": "1.0.0",
+	"files": [
+		"*.mjs",
+		"*.md"
+	],
+	"peerDependencies": {
+	}
+}
