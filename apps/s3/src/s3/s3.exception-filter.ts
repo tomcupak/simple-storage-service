@@ -1,6 +1,36 @@
 import { ArgumentsHost, Catch, ExceptionFilter, Logger } from '@nestjs/common'
+import { BucketsTypes } from '@storage/domains/buckets'
+import { ObjectsTypes } from '@storage/domains/objects'
+import { PoliciesTypes } from '@storage/domains/policies'
 import { S3Exception, S3Types, S3XmlService } from '@storage/domains/s3'
+import { StorageTypes } from '@storage/domains/storage'
 import { Response } from 'express'
+
+/** Domain errors, in the S3 error code each one means. Services throw framework-free typed
+ *  errors; turning them into the S3 wire format happens here, once. */
+const DOMAIN_ERRORS: [new (...args: never[]) => Error, S3Types.ErrorCode][] = [
+	[BucketsTypes.BucketNotFoundError, 'NoSuchBucket'],
+	[BucketsTypes.BucketAlreadyExistsError, 'BucketAlreadyExists'],
+	[BucketsTypes.BucketNotEmptyError, 'BucketNotEmpty'],
+	[BucketsTypes.InvalidBucketNameError, 'InvalidBucketName'],
+	[BucketsTypes.PermissionDeniedError, 'AccessDenied'],
+	[BucketsTypes.CorsNotConfiguredError, 'NoSuchCORSConfiguration'],
+	[BucketsTypes.InvalidCorsConfigurationError, 'MalformedXML'],
+	[ObjectsTypes.ObjectNotFoundError, 'NoSuchKey'],
+	[ObjectsTypes.VersionNotFoundError, 'NoSuchVersion'],
+	[ObjectsTypes.InvalidRangeError, 'InvalidRange'],
+	[ObjectsTypes.UploadNotFoundError, 'NoSuchUpload'],
+	[ObjectsTypes.InvalidPartError, 'InvalidPart'],
+	[ObjectsTypes.InvalidPartOrderError, 'InvalidPartOrder'],
+	[ObjectsTypes.PartTooSmallError, 'EntityTooSmall'],
+	[ObjectsTypes.BadDigestError, 'BadDigest'],
+	[PoliciesTypes.InvalidPolicyDocumentError, 'MalformedPolicy'],
+	[PoliciesTypes.PolicyNotFoundError, 'NoSuchBucketPolicy'],
+	[S3Types.MalformedXmlError, 'MalformedXML'],
+	[S3Types.MalformedBodyError, 'IncompleteBody'],
+	[S3Types.SignatureMismatchError, 'SignatureDoesNotMatch'],
+	[StorageTypes.BlobNotFoundError, 'NoSuchKey'],
+]
 
 /** Every failure leaving the S3 app must be an S3-shaped XML `<Error>` document - AWS SDKs
  *  parse the body to decide whether to retry, and a JSON error would break them. */
@@ -11,8 +41,15 @@ export class S3ExceptionFilter implements ExceptionFilter {
 	catch(exception: unknown, host: ArgumentsHost): void {
 		const res = host.switchToHttp().getResponse<Response>()
 
-		if (exception instanceof S3Exception) {
-			res.status(exception.getStatus()).type('application/xml').send(exception.getResponse())
+		if (res.headersSent) {
+			// A failure mid-stream cannot be turned into an error document any more.
+			res.destroy()
+			return
+		}
+
+		const s3Exception = exception instanceof S3Exception ? exception : this.fromDomainError(exception)
+		if (s3Exception) {
+			this.send(res, s3Exception)
 			return
 		}
 
@@ -22,5 +59,22 @@ export class S3ExceptionFilter implements ExceptionFilter {
 			.status(definition.status)
 			.type('application/xml')
 			.send(S3XmlService.buildError({ code: 'InternalError', message: definition.message }))
+	}
+
+	private send(res: Response, exception: S3Exception): void {
+		// 304 must not carry a body, and Express drops one silently only for some transports.
+		if (exception.getStatus() === S3Types.ErrorCodes.NotModified.status) {
+			res.status(exception.getStatus()).end()
+			return
+		}
+
+		res.status(exception.getStatus()).type('application/xml').send(exception.getResponse())
+	}
+
+	private fromDomainError(exception: unknown): S3Exception | undefined {
+		const match = DOMAIN_ERRORS.find(([type]) => exception instanceof type)
+		if (!match) return undefined
+
+		return new S3Exception(match[1], undefined, exception instanceof Error ? exception.message || undefined : undefined)
 	}
 }

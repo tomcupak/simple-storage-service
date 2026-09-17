@@ -44,11 +44,37 @@ bodies reach the storage service as a raw stream, and SigV4 verification sees th
 - Every response, including errors, is XML built through `S3XmlService`.
 - Domain errors reaching the S3 app are translated into `S3Exception` with an S3 error code from
   `S3Types.ErrorCodes`; `S3ExceptionFilter` renders them. Never let a Nest JSON error escape.
+  The filter owns the domain-error → S3-code table (`DOMAIN_ERRORS`), so handlers do not wrap
+  service calls in try/catch just to remap an error - add the mapping there instead.
 - Authentication is SigV4 (`S3SignatureService` + `S3Guard`), which puts a `S3Types.RequestIdentity`
   on `res.locals.s3`. A request without an `Authorization` header is anonymous, not rejected —
   whether it may proceed is the bucket policy's decision.
-- Authorisation on the S3 side is the policy engine (`PoliciesService.evaluate`), never the
-  management-level `BucketPermission` grants, which only govern the UI.
+- Authorisation on the S3 side runs through `S3AuthorizationService`: the bucket policy decides
+  first (Deny wins, then Allow), and only when no statement matches does it fall back to bucket
+  ownership, the `bucket_access` grants and the canned `BucketAcl`. Handlers call
+  `resolveBucket({ name, identity, action, key })`, which resolves and authorises in one step.
+
+## Routing and request shaping
+
+S3 selects operations by HTTP verb plus a `?subresource` query parameter, which Nest cannot route
+on. There is therefore exactly one handler per verb on each of the two controllers
+(`S3BucketControllerV1` for `/:bucket`, `S3ObjectControllerV1` for `/:bucket/*key`), and the handler
+dispatches on `S3RequestService.subResource(req)`. Every handler must call it - that is what turns
+`?acl`, `?tagging` and the rest into `NotImplemented` instead of a wrong success.
+
+Handlers take `@Res()` and write the response themselves (Nest would answer a POST with 201; S3
+always uses 200). Request parsing lives in `S3RequestService`, response bodies and headers in
+`S3ResponseService` - controllers hold no helpers.
+
+Virtual-host style requests are rewritten to path style by `S3VirtualHostMiddleware`, which only
+touches `req.url`: SigV4 canonicalisation reads `req.originalUrl`, i.e. the path the client signed.
+
+## Listing and key order
+
+S3 orders keys by raw UTF-8 bytes, which is not what the database's locale collation does, so every
+key comparison in `ObjectsService` is forced to `COLLATE "C"`. Keys and common prefixes both count
+towards `max-keys`, so a page is assembled batch by batch: emitting a folder skips everything inside
+it, and the continuation token records whether the page ended on a key or on a folder.
 
 # Config files
 
@@ -199,10 +225,11 @@ container as dev). Seed helpers insert only the FK prerequisites a test needs an
 
 # Running Jest (WSL)
 
-`node` is not on PATH by default — prefix every jest invocation:
+`node` is not on PATH by default — prefix every jest invocation with the nvm bin directory of the
+current user (`ls ~/.nvm/versions/node` shows which versions exist; the repo needs >= 24.10):
 
 ```bash
-PATH="/root/.nvm/versions/node/v24.10.0/bin:$PATH" node_modules/.bin/jest --testPathPatterns="<pattern>" --no-coverage
+PATH="$HOME/.nvm/versions/node/v24.17.0/bin:$PATH" node_modules/.bin/jest --testPathPatterns="<pattern>" --no-coverage
 ```
 
 Note: `--testPathPattern` (singular) is deprecated; use `--testPathPatterns` (plural).

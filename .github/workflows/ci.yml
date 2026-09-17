@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 10400:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 10400
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      JWT_SECRET: ci-secret
+      CRYPTOGRAPHIC_PASSWORD: ci-password-32-characters-minimum
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # `core` / `core_test` are created by docker/postgres-init.sh in dev; the CI service
+      # container starts from a bare image, so they are created here instead.
+      - name: Create databases
+        run: |
+          PGPASSWORD=postgres psql -h localhost -p 10400 -U postgres -d postgres -c 'CREATE DATABASE "core";'
+          PGPASSWORD=postgres psql -h localhost -p 10400 -U postgres -d postgres -c 'CREATE DATABASE "core_test";'
+
+      - name: Lint (backend)
+        run: npx eslint "{apps,libs}/**/*.ts"
+
+      - name: Lint (web)
+        run: npx eslint -c web/eslint.config.mjs "web/**/*.{ts,tsx}"
+
+      - name: Test
+        run: npm test -- --ci --no-coverage
+
+      - name: Build (backend)
+        run: npm run build
+
+      - name: Build (web)
+        run: npm run build:web-storage

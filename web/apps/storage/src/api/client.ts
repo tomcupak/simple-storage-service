@@ -1,147 +1,88 @@
-import { customInstance } from './customInstance'
+import { getAccessKeys } from './schema/access-keys/access-keys'
+import { getAuth } from './schema/auth/auth'
+import { getBuckets } from './schema/buckets/buckets'
+import type {
+	AccessKeyItem,
+	BucketGrantItem,
+	BucketItem,
+	CreateAccessKeyBody,
+	CreateBucketBody,
+	CreatedAccessKey,
+	CreateUserBody,
+	IdentityResponse,
+	ListObjectsResponse,
+	LoginBody,
+	ObjectItem,
+	ObjectsControllerV1ListV1Params,
+	PolicyResponse,
+	RefreshBody,
+	SetBucketGrantBody,
+	SetPolicyBodyDocument,
+	TokensResponse,
+	UserItem,
+} from './schema/models'
+import { AccessKeyItemStatus, BucketGrantItemPermissionsItem, UserItemRole } from './schema/models'
+import { getObjects } from './schema/objects/objects'
+import { getPolicies } from './schema/policies/policies'
+import { getUsers } from './schema/users/users'
 
-/** Hand-written client covering the endpoints the UI uses today.
- *  Replace with the Orval-generated client (`npm run orval:web-storage`) once the
- *  management API can be reached at build time - see TODO.MD. */
+/** Facade over the Orval-generated client (`npm run orval:web-storage`). The generated
+ *  operation names carry the controller/version prefix, so the UI calls them through these
+ *  short aliases instead; the request/response types come from the generated schema. */
 
-export enum UserRole {
-	admin = 'admin',
-	user = 'user',
-}
+const auth = getAuth()
+const users = getUsers()
+const buckets = getBuckets()
+const objects = getObjects()
+const policies = getPolicies()
+const accessKeys = getAccessKeys()
 
-export enum BucketPermission {
-	read = 'read',
-	write = 'write',
-	delete = 'delete',
-	manage = 'manage',
-}
+export const UserRole = UserItemRole
+export const BucketPermission = BucketGrantItemPermissionsItem
+export const AccessKeyStatus = AccessKeyItemStatus
 
-export enum AccessKeyStatus {
-	active = 'active',
-	inactive = 'inactive',
-}
+export type UserRole = UserItemRole
+export type BucketPermission = BucketGrantItemPermissionsItem
+export type AccessKeyStatus = AccessKeyItemStatus
 
-export interface Tokens {
-	accessToken: string
-	refreshToken: string
-	expiresIn: number
-}
-
-export interface Identity {
-	guid: string
-	email: string
-	role: UserRole
-}
-
-export interface UserItem {
-	guid: string
-	email: string
-	name: string | null
-	role: UserRole
-	lastLoginAt: string | null
-	createdAt: string
-}
-
-export interface BucketItem {
-	guid: string
-	name: string
-	ownerUserGuid: string
-	region: string
-	acl: string
-	versioning: string
-	createdAt: string
-}
-
-export interface BucketGrantItem {
-	userGuid: string
-	permissions: BucketPermission[]
-}
-
-export interface AccessKeyItem {
-	accessKeyId: string
-	userGuid: string
-	description: string | null
-	status: AccessKeyStatus
-	expiresAt: string | null
-	lastUsedAt: string | null
-	createdAt: string
-}
-
-export interface CreatedAccessKey extends AccessKeyItem {
-	secretAccessKey: string
-}
-
-export interface ObjectItem {
-	key: string
-	size: number
-	etag: string
-	contentType: string | null
-	versionId: string
-	lastModified: string
-}
-
-export interface ListObjectsResponse {
-	objects: ObjectItem[]
-	commonPrefixes: string[]
-	isTruncated: boolean
-	nextContinuationToken?: string
+export type Identity = IdentityResponse
+export type Tokens = TokensResponse
+export type {
+	AccessKeyItem,
+	BucketGrantItem,
+	BucketItem,
+	CreatedAccessKey,
+	ListObjectsResponse,
+	ObjectItem,
+	PolicyResponse,
+	UserItem,
 }
 
 export const api = {
-	login: (body: { email: string, password: string }) =>
-		customInstance<Tokens>({ url: '/v1/auth/login', method: 'POST', data: body }),
+	login: (body: LoginBody) => auth.authControllerV1LoginV1(body),
+	refresh: (body: RefreshBody) => auth.authControllerV1RefreshV1(body),
+	logout: (body: RefreshBody) => auth.authControllerV1LogoutV1(body),
+	me: () => auth.authControllerV1MeV1(),
 
-	refresh: (body: { refreshToken: string }) =>
-		customInstance<Tokens>({ url: '/v1/auth/refresh', method: 'POST', data: body }),
+	listUsers: () => users.usersControllerV1ListV1(),
+	createUser: (body: CreateUserBody) => users.usersControllerV1CreateV1(body),
+	deleteUser: (userGuid: string) => users.usersControllerV1DeleteV1(userGuid),
 
-	logout: (body: { refreshToken: string }) =>
-		customInstance<void>({ url: '/v1/auth/logout', method: 'POST', data: body }),
+	listBuckets: () => buckets.bucketsControllerV1ListV1(),
+	createBucket: (body: CreateBucketBody) => buckets.bucketsControllerV1CreateV1(body),
+	deleteBucket: (bucketName: string) => buckets.bucketsControllerV1DeleteV1(bucketName),
+	listBucketGrants: (bucketName: string) => buckets.bucketsControllerV1ListGrantsV1(bucketName),
+	setBucketGrant: (bucketName: string, body: SetBucketGrantBody) => buckets.bucketsControllerV1SetGrantV1(bucketName, body),
+	removeBucketGrant: (bucketName: string, userGuid: string) => buckets.bucketsControllerV1RemoveGrantV1(bucketName, userGuid),
 
-	me: () =>
-		customInstance<Identity>({ url: '/v1/auth/me', method: 'GET' }),
+	getBucketPolicy: (bucketName: string) => policies.policiesControllerV1GetV1(bucketName),
+	setBucketPolicy: (bucketName: string, document: SetPolicyBodyDocument) => policies.policiesControllerV1SetV1(bucketName, { document }),
+	deleteBucketPolicy: (bucketName: string) => policies.policiesControllerV1DeleteV1(bucketName),
 
-	listUsers: () =>
-		customInstance<UserItem[]>({ url: '/v1/users', method: 'GET' }),
+	listObjects: (bucketName: string, params: ObjectsControllerV1ListV1Params) => objects.objectsControllerV1ListV1(bucketName, params),
+	listObjectVersions: (bucketName: string, key: string) => objects.objectsControllerV1ListVersionsV1(bucketName, { key }),
 
-	createUser: (body: { email: string, password: string, name?: string, role: UserRole }) =>
-		customInstance<UserItem>({ url: '/v1/users', method: 'POST', data: body }),
-
-	deleteUser: (userGuid: string) =>
-		customInstance<void>({ url: `/v1/users/${userGuid}`, method: 'DELETE' }),
-
-	listBuckets: () =>
-		customInstance<BucketItem[]>({ url: '/v1/buckets', method: 'GET' }),
-
-	createBucket: (body: { name: string, region?: string }) =>
-		customInstance<BucketItem>({ url: '/v1/buckets', method: 'POST', data: body }),
-
-	deleteBucket: (bucketName: string) =>
-		customInstance<void>({ url: `/v1/buckets/${bucketName}`, method: 'DELETE' }),
-
-	listBucketGrants: (bucketName: string) =>
-		customInstance<BucketGrantItem[]>({ url: `/v1/buckets/${bucketName}/grants`, method: 'GET' }),
-
-	setBucketGrant: (bucketName: string, body: BucketGrantItem) =>
-		customInstance<void>({ url: `/v1/buckets/${bucketName}/grants`, method: 'PUT', data: body }),
-
-	removeBucketGrant: (bucketName: string, userGuid: string) =>
-		customInstance<void>({ url: `/v1/buckets/${bucketName}/grants/${userGuid}`, method: 'DELETE' }),
-
-	getBucketPolicy: (bucketName: string) =>
-		customInstance<{ document: unknown | null }>({ url: `/v1/buckets/${bucketName}/policy`, method: 'GET' }),
-
-	setBucketPolicy: (bucketName: string, document: unknown) =>
-		customInstance<void>({ url: `/v1/buckets/${bucketName}/policy`, method: 'PUT', data: { document } }),
-
-	listObjects: (bucketName: string, params: { prefix?: string, delimiter?: string, continuationToken?: string }) =>
-		customInstance<ListObjectsResponse>({ url: `/v1/buckets/${bucketName}/objects`, method: 'GET', params }),
-
-	listAccessKeys: () =>
-		customInstance<AccessKeyItem[]>({ url: '/v1/access-keys', method: 'GET' }),
-
-	createAccessKey: (body: { description?: string }) =>
-		customInstance<CreatedAccessKey>({ url: '/v1/access-keys', method: 'POST', data: body }),
-
-	deleteAccessKey: (accessKeyId: string) =>
-		customInstance<void>({ url: `/v1/access-keys/${accessKeyId}`, method: 'DELETE' }),
+	listAccessKeys: () => accessKeys.accessKeysControllerV1ListV1(),
+	createAccessKey: (body: CreateAccessKeyBody) => accessKeys.accessKeysControllerV1CreateV1(body),
+	deleteAccessKey: (accessKeyId: string) => accessKeys.accessKeysControllerV1DeleteV1(accessKeyId),
 }

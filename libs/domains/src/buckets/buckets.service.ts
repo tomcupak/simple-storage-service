@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common'
-import { BucketPermission, coreSchema, DbProvider, DrizzleErrorCode, UserRole } from '@storage/database'
+import { BucketPermission, BucketVersioning, coreSchema, DbProvider, DrizzleErrorCode, UserRole } from '@storage/database'
 import { and, count, eq, isNull } from 'drizzle-orm'
 
+import { S3Types } from '../s3/s3.types'
 import { BucketsTypes } from './buckets.types'
 
 @Injectable()
@@ -32,6 +33,18 @@ export class BucketsService {
 		return rows
 			.filter((row) => row.bucket.ownerUserGuid === userGuid || (row.access?.permissions.length ?? 0) > 0)
 			.map((row) => this.toItem(row.bucket))
+	}
+
+	/** Like `getByName`, but a missing bucket is an answer rather than an error - `CreateBucket`
+	 *  has to tell "not there" apart from "already yours". */
+	async findByName(name: string): Promise<BucketsTypes.BucketItem | null> {
+		const [found] = await this.db.core
+			.select()
+			.from(coreSchema.bucket)
+			.where(and(eq(coreSchema.bucket.name, name), isNull(coreSchema.bucket.deletedAt)))
+			.limit(1)
+
+		return found ? this.toItem(found) : null
 	}
 
 	async getByName(name: string): Promise<BucketsTypes.BucketItem> {
@@ -95,6 +108,53 @@ export class BucketsService {
 			.where(eq(coreSchema.bucket.guid, guid))
 	}
 
+	/** `PutBucketVersioning`. S3 has no way back to `disabled` once versioning was enabled -
+	 *  it can only be suspended, which keeps the versions already recorded. */
+	async setVersioning({ guid, versioning }: { guid: string, versioning: BucketVersioning }): Promise<void> {
+		await this.db.core
+			.update(coreSchema.bucket)
+			.set({ versioning, updatedAt: new Date() })
+			.where(eq(coreSchema.bucket.guid, guid))
+	}
+
+	/** `PutBucketCors`. The rules are stored as given and evaluated per request by the S3 app. */
+	async setCors({ guid, configuration }: { guid: string, configuration: S3Types.CorsConfiguration }): Promise<void> {
+		if (!configuration.rules.length) throw new BucketsTypes.InvalidCorsConfigurationError()
+
+		for (const rule of configuration.rules) {
+			if (!rule.allowedOrigins?.length || !rule.allowedMethods?.length) throw new BucketsTypes.InvalidCorsConfigurationError()
+		}
+
+		await this.db.core
+			.update(coreSchema.bucket)
+			.set({ cors: configuration, updatedAt: new Date() })
+			.where(eq(coreSchema.bucket.guid, guid))
+	}
+
+	async deleteCors(guid: string): Promise<void> {
+		await this.db.core
+			.update(coreSchema.bucket)
+			.set({ cors: null, updatedAt: new Date() })
+			.where(eq(coreSchema.bucket.guid, guid))
+	}
+
+	/** First rule matching the request's origin and method, i.e. the one whose headers the
+	 *  response must echo. Undefined means the request is not allowed by the configuration. */
+	matchCorsRule({ cors, origin, method, requestHeaders }: {
+		cors: S3Types.CorsConfiguration | null
+		origin: string
+		method: string
+		requestHeaders?: string[]
+	}): S3Types.CorsRule | undefined {
+		return cors?.rules.find((rule) => {
+			if (!rule.allowedOrigins.some((allowed) => this.wildcardMatch(allowed, origin))) return false
+			if (!rule.allowedMethods.includes(method.toUpperCase())) return false
+
+			return (requestHeaders ?? []).every((header) =>
+				(rule.allowedHeaders ?? []).some((allowed) => this.wildcardMatch(allowed.toLowerCase(), header.toLowerCase())))
+		})
+	}
+
 	async listGrants(bucketGuid: string): Promise<BucketsTypes.BucketGrant[]> {
 		return this.db.core
 			.select()
@@ -151,6 +211,12 @@ export class BucketsService {
 		return grant?.permissions.includes(permission) ?? false
 	}
 
+	/** CORS origins and headers allow a single `*` wildcard anywhere in the value. */
+	private wildcardMatch(pattern: string, value: string): boolean {
+		const escaped = pattern.replace(/[.+^${}()|[\]\\?]/g, '\\$&')
+		return new RegExp(`^${escaped.replace(/\*/g, '.*')}$`).test(value)
+	}
+
 	private assertValidName(name: string): void {
 		if (
 			!BucketsTypes.BUCKET_NAME_PATTERN.test(name)
@@ -169,6 +235,7 @@ export class BucketsService {
 			region: row.region,
 			acl: row.acl,
 			versioning: row.versioning,
+			cors: (row.cors as S3Types.CorsConfiguration | null) ?? null,
 			createdAt: row.createdAt,
 		}
 	}

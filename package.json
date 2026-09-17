@@ -19,7 +19,7 @@
     "build:web-storage": "cd web && tsc -b && vite build --config vite.config.storage.mts",
     "build:web": "tsc -b web && npm run build:web-storage",
     "lint:web": "eslint -c web/eslint.config.mjs \"web/**/*.{ts,tsx}\" --fix",
-    "orval:web-storage": "del ./web/apps/storage/src/api/schema/* && orval --config ./web/orval.config.js --project storageApi && eslint -c web/eslint.config.mjs \"web/apps/storage/src/api/schema/**/*.{ts,tsx}\" --fix"
+    "orval:web-storage": "del ./web/apps/storage/src/api/schema/* && orval --config ./web/orval.config.js --project storageApi"
   },
   "engines": {
     "npm": ">=11.6",
