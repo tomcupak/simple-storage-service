@@ -3,11 +3,13 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router'
 
 import { UserRole } from './api/client'
 import { Layout } from './components/Layout'
+import { I18nProvider } from './i18n'
 import { AccessKeysPage } from './pages/AccessKeys'
 import { BucketDetailPage } from './pages/BucketDetail'
 import { BucketsPage } from './pages/Buckets'
 import { LoadingPage } from './pages/Loading'
 import { LoginPage } from './pages/Login'
+import { ProfilePage } from './pages/Profile'
 import { UsersPage } from './pages/Users'
 import { AuthProvider, useAuth } from './store/auth'
 
@@ -16,6 +18,7 @@ export enum AppPaths {
 	BucketDetail = '/buckets/:bucketName',
 	AccessKeys = '/access-keys',
 	Users = '/users',
+	Profile = '/profile',
 }
 
 export const buildPath = {
@@ -46,9 +49,11 @@ export default function App() {
 	if (!config) return <LoadingPage />
 
 	return (
-		<AuthProvider>
-			<Router />
-		</AuthProvider>
+		<I18nProvider>
+			<AuthProvider>
+				<Router />
+			</AuthProvider>
+		</I18nProvider>
 	)
 }
 
@@ -65,6 +70,7 @@ function Router() {
 					<Route path={AppPaths.Buckets} element={<BucketsPage />} />
 					<Route path={AppPaths.BucketDetail} element={<BucketDetailPage />} />
 					<Route path={AppPaths.AccessKeys} element={<AccessKeysPage />} />
+					<Route path={AppPaths.Profile} element={<ProfilePage />} />
 					{user.role === UserRole.admin && <Route path={AppPaths.Users} element={<UsersPage />} />}
 					<Route path="*" element={<Navigate to={AppPaths.Buckets} replace />} />
 				</Routes>

@@ -23,9 +23,11 @@ import type {
 	ObjectItem,
 	ObjectsControllerV1DeleteV1Params,
 	ObjectsControllerV1ListV1Params,
+	ObjectVersionItem,
 	PolicyResponse,
 	PresignObjectBody,
 	RefreshBody,
+	SetAccessKeyStatusBody,
 	SetBucketAclBody,
 	SetBucketGrantBody,
 	SetBucketVersioningBody,
@@ -84,6 +86,7 @@ export type {
 	CreatedAccessKey,
 	ListObjectsResponse,
 	ObjectItem,
+	ObjectVersionItem,
 	PolicyResponse,
 	UsageItem,
 	UserItem,
@@ -132,6 +135,7 @@ export const api = {
 
 	listAccessKeys: (params?: AccessKeysControllerV1ListV1Params) => accessKeys.accessKeysControllerV1ListV1(params),
 	createAccessKey: (body: CreateAccessKeyBody) => accessKeys.accessKeysControllerV1CreateV1(body),
+	setAccessKeyStatus: (accessKeyId: string, body: SetAccessKeyStatusBody) => accessKeys.accessKeysControllerV1SetStatusV1(accessKeyId, body),
 	deleteAccessKey: (accessKeyId: string) => accessKeys.accessKeysControllerV1DeleteV1(accessKeyId),
 
 	bucketsUsage: () => usage.usageControllerV1BucketsV1(),

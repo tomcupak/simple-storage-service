@@ -63,3 +63,25 @@ export function boolEnv(key: string): boolean {
 export const DrizzleErrorCode = {
 	UNIQUE_CONSTRAINT_VIOLATION: '23505',
 }
+
+/** Postgres error code behind a failed query.
+ *
+ *  Drizzle wraps query failures in a `DrizzleQueryError` and keeps the driver's error as
+ *  `cause`, so the `code` is one level down - reading it off the thrown error alone silently
+ *  turns every constraint violation into a 500. */
+export function drizzleErrorCode(err: unknown): string | undefined {
+	for (let current: unknown = err, depth = 0; current && depth < 5; depth += 1) {
+		if (typeof current !== 'object') return undefined
+
+		const code = (current as { code?: unknown }).code
+		if (typeof code === 'string') return code
+
+		current = (current as { cause?: unknown }).cause
+	}
+
+	return undefined
+}
+
+export function isUniqueViolation(err: unknown): boolean {
+	return drizzleErrorCode(err) === DrizzleErrorCode.UNIQUE_CONSTRAINT_VIOLATION
+}

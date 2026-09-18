@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { BucketAcl, BucketPermission, BucketVersioning, coreSchema, DbProvider, DrizzleErrorCode, UserRole } from '@storage/database'
+import { BucketAcl, BucketPermission, BucketVersioning, coreSchema, DbProvider, isUniqueViolation,UserRole } from '@storage/database'
 import { and, count, eq, isNull } from 'drizzle-orm'
 
 import { S3Types } from '../s3/s3.types'
@@ -89,7 +89,7 @@ export class BucketsService {
 
 			return this.toItem(created)
 		} catch (err) {
-			if (this.isUniqueViolation(err)) throw new BucketsTypes.BucketAlreadyExistsError()
+			if (isUniqueViolation(err)) throw new BucketsTypes.BucketAlreadyExistsError()
 			throw err
 		}
 	}
@@ -258,7 +258,4 @@ export class BucketsService {
 		}
 	}
 
-	private isUniqueViolation(err: unknown): boolean {
-		return typeof err === 'object' && err !== null && 'code' in err && err.code === DrizzleErrorCode.UNIQUE_CONSTRAINT_VIOLATION
-	}
 }

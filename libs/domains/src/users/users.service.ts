@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { coreSchema, DbProvider, DrizzleErrorCode, UserRole, UserStatus } from '@storage/database'
+import { coreSchema, DbProvider, isUniqueViolation,UserRole, UserStatus } from '@storage/database'
 import { Api } from '@storage/shared'
 import { and, asc, count, eq, isNull } from 'drizzle-orm'
 
@@ -57,7 +57,7 @@ export class UsersService {
 
 			return this.toItem(created)
 		} catch (err) {
-			if (this.isUniqueViolation(err)) throw new UsersTypes.EmailAlreadyUsedError()
+			if (isUniqueViolation(err)) throw new UsersTypes.EmailAlreadyUsedError()
 			throw err
 		}
 	}
@@ -173,7 +173,4 @@ export class UsersService {
 		}
 	}
 
-	private isUniqueViolation(err: unknown): boolean {
-		return typeof err === 'object' && err !== null && 'code' in err && err.code === DrizzleErrorCode.UNIQUE_CONSTRAINT_VIOLATION
-	}
 }

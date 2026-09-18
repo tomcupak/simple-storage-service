@@ -104,25 +104,43 @@ bucketu, statistiky, kvóty, správa uživatelů, audit log, paginace.
 - [x] Audit log — tabulka `audit_log`, dekorátor `@Audited(...)` + `AuditInterceptor`,
       výpis `GET /v1/audit` (stránkovaný, s filtry) a `GET /v1/audit/actions`.
 - [x] Paginace u výpisů uživatelů a klíčů (`Api.PagingQuery`).
+- [ ] Endpoint pro rozpad `userGuid` → e-mail dostupný i správci bucketu (dnes umí seznam
+      uživatelů jen admin, takže neadmin vidí přístupy k vlastnímu bucketu jen read-only).
 
 Vedlejší úprava: `ApiExceptionFilter` (globální, po vzoru `S3ExceptionFilter`) mapuje doménové chyby
 na HTTP status + `{ code }`, takže handlery už nemusí obalovat volání služeb do try/catch.
 
 ## 5. UI [UI]
 
-Hotové: login, layout, seznam bucketů, jednoduchý prohlížeč (prefixy + soubory), access keys, uživatelé.
+Hotové: kompletní správce souborů (upload/download/náhled/sdílení/kopie/mazání), detail bucketu
+v záložkách, i18n cs/en, hlášení chyb podle `code`.
 
-- [ ] Upload souborů (drag & drop, progress, více souborů naráz) a download.
-- [ ] Mazání souborů/složek, vytvoření složky, kopírování/přesun.
-- [ ] Náhled souborů (obrázky, text, PDF) a kopírování presigned odkazu.
-- [ ] Stránkování prohlížeče (`continuationToken`) a řazení sloupců.
-- [ ] Správa přístupů k bucketu: modál s uživateli a jejich `BucketPermission` (API už existuje).
-- [ ] Editor bucket policy (JSON textarea s validací + předpřipravené šablony: public read, read-only uživatel).
-- [ ] Detail bucketu: verzování, ACL, statistiky, historie verzí objektu.
-- [ ] Změna vlastního hesla a profil uživatele.
-- [ ] Hlášení chyb z API podle `code` (dnes se ukazují obecné hlášky).
-- [ ] i18n (cs/en) — texty jsou zatím natvrdo česky v komponentách.
-- [ ] Favicon, manifest, prázdné stavy, loading skeletony.
+- [x] Upload — drag & drop i výběr, více souborů naráz, progress bar per soubor
+      (`UploadPanel`). Nahrává se sekvenčně: bajty tečou rovnou na disk, šest paralelních PUTů
+      by jen zpomalilo každý z nich a rozbilo smysl progress baru.
+      Download přes `transfer.ts` (blob + `saveBlob`), protože generovaný klient neumí
+      `responseType: 'blob'` ani `onUploadProgress`.
+- [x] Mazání souborů i složek (rekurzivně), vytvoření složky, kopírování a přesun/přejmenování
+      (`CopyMoveDialog` — jeden dialog pro obojí, zdroj končící `/` překlíčuje celou složku).
+- [x] Náhled obrázků, textu a PDF (`ObjectPreview`, strop 5 MB) a kopírování presigned odkazu
+      (`ShareLinkDialog` s volbou platnosti 1 h / 1 den / 7 dní).
+- [x] Stránkování prohlížeče přes `continuationToken` (zásobník tokenů → funguje i Předchozí)
+      a řazení sloupců. Řazení je vědomě jen v rámci strany — API vydává klíče v bajtovém pořadí
+      a token je na to pořadí navázaný, takže globální řazení by znamenalo stáhnout celý bucket.
+- [x] Správa přístupů k bucketu (`BucketAccess`) — checkboxy per `BucketPermission`.
+      **Omezení:** editace vyžaduje seznam uživatelů, a `GET /v1/users` je jen pro adminy;
+      neadmin proto vidí granty read-only (viz TODO v sekci 4 níže).
+- [x] Editor bucket policy s validací JSON a šablonami (veřejné čtení, uživatel jen pro čtení,
+      vyžadovat HTTPS). Prázdný editor + Uložit = smazání policy.
+- [x] Detail bucketu v záložkách (Soubory / Nastavení / Přístupy / Policy): verzování, ACL,
+      kvóta, statistiky, historie verzí objektu (`ObjectVersions` — stažení i trvalé smazání verze).
+- [x] Profil uživatele se změnou hesla, obsazeným místem a přepínačem jazyka.
+- [x] Hlášení chyb podle `code` — `apiErrorKey` mapuje `{ code }` na překlad, neznámý kód spadne
+      na obecnou hlášku místo aby prosákl syrový identifikátor.
+- [x] i18n (cs/en) — čeština je zdroj pravdy, `en` je `Record<TranslationKey, string>`, takže
+      chybějící překlad shodí build. Jazyk se detekuje z prohlížeče a drží v `localStorage`.
+- [x] Favicon (SVG), `manifest.webmanifest`, prázdné stavy (`EmptyState`) a skeletony
+      (`TableSkeleton`/`BlockSkeleton`, s respektem k `prefers-reduced-motion`).
 
 ## 6. Kvalita a provoz
 
@@ -130,7 +148,8 @@ Hotové: login, layout, seznam bucketů, jednoduchý prohlížeč (prefixy + sou
       round-trip podepsat → ověřit), `StorageService` (write/read/range/concat),
       `BucketsService` a `ObjectsService` (DB integrační testy proti `core_test`).
       Hotovo: `S3ChunkedStream`, `S3RequestService`, `PoliciesService` (matice + podmínky),
-      `S3AuthorizationService`, `UsageService` (kvóty) a guardy `ObjectsService` (klíče, prefixy, kopie).
+      `S3AuthorizationService`, `UsageService` (kvóty), guardy `ObjectsService` (klíče, prefixy,
+      kopie), `drizzleErrorCode`/`isUniqueViolation` a převod query parametrů v `ListObjectsQuery`.
 - [ ] E2E test proti `apps/s3` skutečným AWS SDK klientem (`@aws-sdk/client-s3`) — hlavní scénáře.
 - [ ] Helpery pro migrace a truncate v `@storage/database` (`libs/database/src/testing`) — zatím neexistují.
 - [ ] Health/readiness endpoint pro `apps/s3` (dnes má jen `apps/api`).
@@ -139,8 +158,8 @@ Hotové: login, layout, seznam bucketů, jednoduchý prohlížeč (prefixy + sou
 - [ ] Garbage collector osiřelých blobů (verze smazané z DB, nedokončené multipart uploady starší N dní).
 - [ ] Deployment: Dockerfile / systemd unit, build pipeline, konfigurace přes env.
 - [ ] Šifrování objektů at rest (SSE-S3) a `x-amz-server-side-encryption` hlavičky.
-- security audit (hlavně EPs)
+- [ ] security audit (hlavně EPs)
 
 ## 7. Poznámky a úpravy
 - vyměňme Redis za valkey (redis knihovna je kompatibilní)
-
+- angličtina je default jazyk v ui

@@ -4,7 +4,9 @@ import Axios from 'axios'
 export const LS_ACCESS_TOKEN_KEY = 'storage:access_token'
 export const LS_REFRESH_TOKEN_KEY = 'storage:refresh_token'
 
-const instance = Axios.create()
+/** Shared for the hand-written transfer calls in `transfer.ts` too, so uploads and downloads
+ *  pick up the same base URL, auth header and 401 handling as the generated client. */
+export const instance = Axios.create()
 
 instance.interceptors.request.use((config) => {
 	// Resolved per-request: window.config is filled from config.json after the app mounts,

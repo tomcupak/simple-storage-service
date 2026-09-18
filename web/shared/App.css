@@ -110,3 +110,383 @@
 	margin-bottom: 12px;
 	color: var(--color-text-muted);
 }
+
+.row.space-between {
+	justify-content: space-between;
+}
+
+.row.wrap {
+	flex-wrap: wrap;
+}
+
+.right {
+	text-align: right;
+}
+
+.nowrap {
+	white-space: nowrap;
+}
+
+.ellipsis {
+	max-width: 420px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.success {
+	color: var(--color-success);
+}
+
+button.block {
+	width: 100%;
+}
+
+.section {
+	padding: 16px;
+}
+
+.section h2 {
+	font-size: 15px;
+	margin: 0 0 12px;
+}
+
+.login-card h1 {
+	font-size: 18px;
+	margin: 0 0 16px;
+}
+
+/* Tabs --------------------------------------------------------------------- */
+
+.tabs {
+	display: flex;
+	gap: 4px;
+	border-bottom: 1px solid var(--color-border);
+	margin-bottom: 16px;
+}
+
+button.tab {
+	background: none;
+	border: none;
+	border-bottom: 2px solid transparent;
+	border-radius: 0;
+	color: var(--color-text-muted);
+	padding: 8px 14px;
+}
+
+button.tab:hover:not(:disabled) {
+	background: none;
+	color: var(--color-text);
+}
+
+button.tab.active {
+	color: var(--color-text);
+	border-bottom-color: var(--color-accent);
+}
+
+/* Tables ------------------------------------------------------------------- */
+
+th.sortable {
+	cursor: pointer;
+	user-select: none;
+}
+
+th.sortable:hover {
+	color: var(--color-text);
+}
+
+.sort-arrow {
+	margin-left: 4px;
+	font-size: 9px;
+}
+
+td.actions button {
+	padding: 4px 8px;
+	margin-left: 4px;
+}
+
+.badge {
+	display: inline-block;
+	margin-left: 6px;
+	padding: 1px 7px;
+	border-radius: 999px;
+	border: 1px solid var(--color-border);
+	background: var(--color-bg);
+	color: var(--color-text-muted);
+	font-size: 11px;
+}
+
+.badge.success {
+	color: var(--color-success);
+	border-color: var(--color-success);
+}
+
+.pager {
+	margin-top: 12px;
+	gap: 12px;
+}
+
+/* Modal -------------------------------------------------------------------- */
+
+.modal-backdrop {
+	position: fixed;
+	inset: 0;
+	background: rgb(0 0 0 / 60%);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 24px;
+	z-index: 10;
+}
+
+.modal {
+	width: 480px;
+	max-width: 100%;
+	max-height: 90vh;
+	display: flex;
+	flex-direction: column;
+}
+
+.modal-wide {
+	width: 860px;
+}
+
+.modal-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 14px 16px;
+	border-bottom: 1px solid var(--color-border);
+}
+
+.modal-header h2 {
+	font-size: 15px;
+	margin: 0;
+}
+
+.modal-body {
+	padding: 16px;
+	overflow: auto;
+}
+
+.modal-footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	padding: 12px 16px;
+	border-top: 1px solid var(--color-border);
+}
+
+/* Upload ------------------------------------------------------------------- */
+
+.upload-panel {
+	padding: 12px;
+	margin-bottom: 16px;
+}
+
+.dropzone {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+	padding: 20px;
+	border: 1px dashed var(--color-border);
+	border-radius: var(--radius);
+	cursor: pointer;
+	text-align: center;
+}
+
+.dropzone:hover,
+.dropzone.dragging {
+	border-color: var(--color-accent);
+	background: var(--color-surface-hover);
+}
+
+.upload-queue {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-top: 12px;
+}
+
+.upload-item {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.progress {
+	height: 6px;
+	border-radius: 999px;
+	background: var(--color-bg);
+	overflow: hidden;
+}
+
+.progress-bar {
+	height: 100%;
+	background: var(--color-accent);
+	transition: width 0.15s linear;
+}
+
+.progress.failed .progress-bar {
+	background: var(--color-danger);
+}
+
+/* Preview ------------------------------------------------------------------ */
+
+.preview-image {
+	display: block;
+	max-width: 100%;
+	max-height: 60vh;
+	margin: 0 auto;
+}
+
+.preview-frame {
+	width: 100%;
+	height: 60vh;
+	border: none;
+	background: #fff;
+}
+
+.preview-text {
+	max-height: 60vh;
+	overflow: auto;
+	margin: 0;
+	padding: 12px;
+	background: var(--color-bg);
+	border-radius: var(--radius);
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 12px;
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+
+/* Settings ----------------------------------------------------------------- */
+
+.settings-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+	gap: 16px;
+	align-items: start;
+}
+
+.stats {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 6px 16px;
+	margin: 0 0 12px;
+}
+
+.stats dt {
+	color: var(--color-text-muted);
+}
+
+.stats dd {
+	margin: 0;
+}
+
+.policy-editor {
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 12px;
+	margin-bottom: 12px;
+	resize: vertical;
+}
+
+.checkbox {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	color: var(--color-text-muted);
+}
+
+.checkbox input {
+	width: auto;
+}
+
+.secret-callout {
+	border-color: var(--color-success);
+	margin-bottom: 16px;
+}
+
+/* Empty states and loading ------------------------------------------------- */
+
+.empty-state {
+	padding: 32px 16px;
+	text-align: center;
+}
+
+.empty-state-icon {
+	font-size: 28px;
+	margin-bottom: 8px;
+}
+
+.empty-state-title {
+	margin: 0 0 4px;
+	font-weight: 500;
+}
+
+.skeleton {
+	display: block;
+	height: 12px;
+	width: 100%;
+	border-radius: 4px;
+	background: linear-gradient(90deg, var(--color-surface-hover) 25%, var(--color-border) 50%, var(--color-surface-hover) 75%);
+	background-size: 200% 100%;
+	animation: skeleton-shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+	from { background-position: 200% 0; }
+	to { background-position: -200% 0; }
+}
+
+.loading-spinner {
+	width: 28px;
+	height: 28px;
+	border: 3px solid var(--color-border);
+	border-top-color: var(--color-accent);
+	border-radius: 50%;
+	animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+	to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.skeleton,
+	.loading-spinner {
+		animation: none;
+	}
+}
+
+/* Sidebar extras ----------------------------------------------------------- */
+
+.sidebar-user {
+	padding: 8px 12px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.language-switch {
+	display: flex;
+	gap: 4px;
+	padding: 0 12px 8px;
+}
+
+.language-switch.centered-row {
+	justify-content: center;
+	padding: 12px 0 0;
+}
+
+.language-switch button {
+	padding: 2px 8px;
+	font-size: 11px;
+	color: var(--color-text-muted);
+}
+
+.language-switch button.active {
+	color: var(--color-text);
+	border-color: var(--color-accent);
+}

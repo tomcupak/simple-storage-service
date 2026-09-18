@@ -1,7 +1,7 @@
 export function LoadingPage() {
 	return (
 		<div className="centered">
-			<p className="muted">Načítám…</p>
+			<div className="loading-spinner" aria-label="loading" />
 		</div>
 	)
 }

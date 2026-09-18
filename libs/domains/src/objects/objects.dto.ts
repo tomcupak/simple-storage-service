@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger'
 import { StorageClass } from '@storage/database'
 import { Api } from '@storage/shared'
+import { Type } from 'class-transformer'
 import { IsBoolean, IsInt, IsOptional, IsString, Max, Min } from 'class-validator'
 
 export namespace ObjectsDto {
@@ -51,8 +52,11 @@ export namespace ObjectsDto {
 		@IsString()
 		declare delimiter?: string
 
+		// A query string carries numbers as text, and the validation pipe does not convert
+		// implicitly - without `@Type` every `?maxKeys=` would be rejected as "not an integer".
 		@ApiProperty({ type: 'integer', required: false, minimum: 1, default: 1000 })
 		@IsOptional()
+		@Type(() => Number)
 		@IsInt()
 		@Min(1)
 		declare maxKeys?: number
