@@ -5,6 +5,7 @@ import { Request } from 'express'
 import { S3Types } from './s3.types'
 
 const ALGORITHM = 'AWS4-HMAC-SHA256'
+const SERVICE = 's3'
 const CHUNK_ALGORITHM = 'AWS4-HMAC-SHA256-PAYLOAD'
 const MAX_CLOCK_SKEW_MS = 15 * 60 * 1000
 const EMPTY_SHA256 = crypto.createHash('sha256').update('').digest('hex')
@@ -108,6 +109,65 @@ export class S3SignatureService {
 		this.assertSignatureEquals(expected, parsed.signature)
 	}
 
+	/** Builds a presigned URL for an object, as the management UI hands out for sharing.
+	 *  It is the mirror image of `verifyPresigned`: the same canonical request, signed rather
+	 *  than checked, so a link this produces verifies against the S3 endpoint unchanged. */
+	presign({ method, endpoint, bucket, key, expiresIn, accessKeyId, secretAccessKey, region, query }: {
+		method: string
+		/** Origin of the S3 endpoint the link points at, e.g. `https://s3.example.com`. */
+		endpoint: string
+		bucket: string
+		key: string
+		expiresIn: number
+		accessKeyId: string
+		secretAccessKey: string
+		region: string
+		/** Extra parameters that become part of the signature (`versionId`, response overrides). */
+		query?: Record<string, string | undefined>
+	}): string {
+		const url = new URL(endpoint)
+		const amzDate = this.toAmzDate(new Date())
+		const date = amzDate.slice(0, 8)
+		const credentialScope = `${date}/${region}/${SERVICE}/aws4_request`
+
+		const canonicalUri = `/${bucket}/${key}`
+			.split('/')
+			.map((segment) => this.uriEncode(segment))
+			.join('/')
+
+		const parameters: Record<string, string> = {
+			'X-Amz-Algorithm': ALGORITHM,
+			'X-Amz-Credential': `${accessKeyId}/${credentialScope}`,
+			'X-Amz-Date': amzDate,
+			'X-Amz-Expires': String(expiresIn),
+			'X-Amz-SignedHeaders': 'host',
+		}
+		for (const [name, value] of Object.entries(query ?? {})) {
+			if (value !== undefined) parameters[name] = value
+		}
+
+		const canonicalQuery = Object.entries(parameters)
+			.map(([name, value]) => [this.uriEncode(name), this.uriEncode(value)] as const)
+			.sort((a, b) => (a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0])))
+			.map(([name, value]) => `${name}=${value}`)
+			.join('&')
+
+		const canonicalRequest = [
+			method.toUpperCase(),
+			canonicalUri,
+			canonicalQuery,
+			`host:${url.host}\n`,
+			'host',
+			S3Types.UNSIGNED_PAYLOAD,
+		].join('\n')
+
+		const stringToSign = this.buildStringToSign({ amzDate, credentialScope, canonicalRequest })
+		const signingKey = this.deriveSigningKey({ secretAccessKey, date, region, service: SERVICE })
+		const signature = crypto.createHmac('sha256', signingKey).update(stringToSign).digest('hex')
+
+		return `${url.origin}${canonicalUri}?${canonicalQuery}&X-Amz-Signature=${signature}`
+	}
+
 	/** Signature of one `aws-chunked` chunk: chained from the previous chunk's signature,
 	 *  seeded by the request signature itself. */
 	computeChunkSignature({ context, previousSignature, chunkHash }: {
@@ -206,6 +266,11 @@ export class S3SignatureService {
 	private assertFreshTimestamp(amzDate: string): void {
 		const timestamp = this.parseAmzDate(amzDate)
 		if (Math.abs(Date.now() - timestamp) > MAX_CLOCK_SKEW_MS) throw new S3Types.ClockSkewError()
+	}
+
+	/** `20240131T120000Z` - the format every `X-Amz-Date` uses. */
+	private toAmzDate(date: Date): string {
+		return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
 	}
 
 	private parseAmzDate(amzDate: string): number {

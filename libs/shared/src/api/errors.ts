@@ -24,3 +24,12 @@ export function createErrorDto<Codes extends string[]>(codes: Codes) {
 
 	return ErrorDto
 }
+
+/** `Content-Disposition` for a download, with the file name in both the plain and the
+ *  RFC 5987 form so non-ASCII names survive browsers that only read one of them. */
+export function contentDisposition(key: string, type: 'attachment' | 'inline' = 'attachment'): string {
+	const filename = key.split('/').filter(Boolean).pop() ?? 'download'
+	const ascii = filename.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_')
+
+	return `${type}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`
+}

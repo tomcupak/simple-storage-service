@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, ForbiddenException, Get, HttpCode, HttpStatus, NotFoundException, Param, Post, Put, Version } from '@nestjs/common'
-import { ApiBearerAuth, ApiNotFoundResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger'
-import { UserRole } from '@storage/database'
-import { AccessKeysDto, AccessKeysService, AccessKeysTypes } from '@storage/domains/access-keys'
+import { Body, Controller, Delete, ForbiddenException, Get, HttpCode, HttpStatus, Param, Post, Put, Version } from '@nestjs/common'
+import { ApiBearerAuth, ApiForbiddenResponse, ApiNotFoundResponse, ApiOkResponse, ApiQuery, ApiTags } from '@nestjs/swagger'
+import { AuditAction, UserRole } from '@storage/database'
+import { AccessKeysDto, AccessKeysService } from '@storage/domains/access-keys'
+import { Audited } from '@storage/domains/audit'
 import { AuthTypes, AuthUser, SecuredEp } from '@storage/domains/auth'
 import { Api } from '@storage/shared'
 
@@ -16,19 +17,30 @@ export class AccessKeysControllerV1 {
 	@Get()
 	@Version('1')
 	@SecuredEp()
-	@ApiOkResponse({ type: AccessKeysDto.AccessKeyItem, isArray: true })
-	list(@AuthUser() user: AuthTypes.Identity): Promise<AccessKeysDto.AccessKeyItem[]> {
+	@ApiQuery({ name: 'limit', type: 'integer', required: false })
+	@ApiQuery({ name: 'page', type: 'integer', required: false })
+	@ApiOkResponse({ type: AccessKeysDto.AccessKeyPage })
+	list(
+		@AuthUser() user: AuthTypes.Identity,
+		@Api.PagingQuery({ limit: 50, page: 1 }) paging: Api.PaginationQueryDto,
+	): Promise<AccessKeysDto.AccessKeyPage> {
 		// Admins see every key in the deployment; everyone else only their own.
-		return this.accessKeysService.list(user.role === UserRole.admin ? undefined : user.guid)
+		return this.accessKeysService.list({
+			userGuid: user.role === UserRole.admin ? undefined : user.guid,
+			limit: paging.limit,
+			page: paging.page,
+		})
 	}
 
 	@Post()
 	@Version('1')
 	@SecuredEp()
+	@Audited(AuditAction.accessKeyCreate)
 	@ApiOkResponse({ type: AccessKeysDto.CreatedAccessKey })
+	@ApiForbiddenResponse({ type: AccessKeysDto.AccessKeyForbiddenError })
 	create(@Body() body: AccessKeysDto.CreateAccessKeyBody, @AuthUser() user: AuthTypes.Identity): Promise<AccessKeysDto.CreatedAccessKey> {
 		if (body.userGuid && body.userGuid !== user.guid && user.role !== UserRole.admin) {
-			throw new ForbiddenException({ code: 'permission_denied' })
+			throw Api.gatewayException(ForbiddenException, AccessKeysDto.ErrorCodes.PERMISSION_DENIED)
 		}
 
 		return this.accessKeysService.create({
@@ -41,6 +53,7 @@ export class AccessKeysControllerV1 {
 	@Put(':accessKeyId/status')
 	@Version('1')
 	@SecuredEp()
+	@Audited(AuditAction.accessKeySetStatus)
 	@HttpCode(HttpStatus.NO_CONTENT)
 	@ApiNotFoundResponse({ type: AccessKeysDto.AccessKeyNotFoundError })
 	async setStatus(
@@ -48,30 +61,18 @@ export class AccessKeysControllerV1 {
 		@Body() body: AccessKeysDto.SetAccessKeyStatusBody,
 		@AuthUser() user: AuthTypes.Identity,
 	): Promise<void> {
-		try {
-			await this.accessKeysService.assertAccessible({ accessKeyId, userGuid: user.guid, role: user.role })
-			await this.accessKeysService.setStatus(accessKeyId, body.status)
-		} catch (err) {
-			if (err instanceof AccessKeysTypes.AccessKeyNotFoundError)
-				throw Api.gatewayException(NotFoundException, AccessKeysDto.ErrorCodes.ACCESS_KEY_NOT_FOUND)
-			throw err
-		}
+		await this.accessKeysService.assertAccessible({ accessKeyId, userGuid: user.guid, role: user.role })
+		await this.accessKeysService.setStatus(accessKeyId, body.status)
 	}
 
 	@Delete(':accessKeyId')
 	@Version('1')
 	@SecuredEp()
+	@Audited(AuditAction.accessKeyDelete)
 	@HttpCode(HttpStatus.NO_CONTENT)
 	@ApiNotFoundResponse({ type: AccessKeysDto.AccessKeyNotFoundError })
 	async delete(@Param('accessKeyId') accessKeyId: string, @AuthUser() user: AuthTypes.Identity): Promise<void> {
-		try {
-			await this.accessKeysService.assertAccessible({ accessKeyId, userGuid: user.guid, role: user.role })
-			await this.accessKeysService.delete(accessKeyId)
-		} catch (err) {
-			if (err instanceof AccessKeysTypes.AccessKeyNotFoundError)
-				throw Api.gatewayException(NotFoundException, AccessKeysDto.ErrorCodes.ACCESS_KEY_NOT_FOUND)
-			throw err
-		}
+		await this.accessKeysService.assertAccessible({ accessKeyId, userGuid: user.guid, role: user.role })
+		await this.accessKeysService.delete(accessKeyId)
 	}
-
 }

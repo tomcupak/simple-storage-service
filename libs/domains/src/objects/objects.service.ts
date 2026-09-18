@@ -7,11 +7,18 @@ import { Readable } from 'stream'
 
 import { StorageService } from '../storage/storage.service'
 import { StorageTypes } from '../storage/storage.types'
+import { UsageService } from '../usage/usage.service'
 import { ObjectsTypes } from './objects.types'
 
 const DEFAULT_MAX_KEYS = 1000
 const VERSION_ID_BYTES = 16
 const UPLOAD_ID_BYTES = 24
+
+/** S3's own limit on a key, in UTF-8 bytes. */
+const MAX_KEY_BYTES = 1024
+
+/** What the marker object of a folder is stored as, the type every S3 console writes. */
+const FOLDER_CONTENT_TYPE = 'application/x-directory'
 
 /** Object metadata (keys, versions, sizes, ETags). Byte payloads are owned by `StorageService`;
  *  this service is the only place that links the two together. */
@@ -20,6 +27,7 @@ export class ObjectsService {
 	constructor(
 		private db: DbProvider,
 		private storageService: StorageService,
+		private usageService: UsageService,
 	) {}
 
 	/** Lists the latest version of every key in a bucket, collapsing `delimiter`-separated
@@ -190,11 +198,18 @@ export class ObjectsService {
 
 	/** Streams a payload to disk and records it as the key's newest version.
 	 *  In an unversioned (or suspended) bucket the `null` version is replaced in place. */
-	async put({ bucket, key, stream, contentMd5, accessKeyId, ...headers }: ObjectsTypes.PutObjectParams): Promise<ObjectsTypes.PutObjectResult> {
+	async put({ bucket, key, stream, contentMd5, accessKeyId, declaredLength, ...headers }: ObjectsTypes.PutObjectParams): Promise<ObjectsTypes.PutObjectResult> {
+		this.assertValidKey(key)
+		// Rejecting an announced over-quota write up front saves streaming a payload that would
+		// only be deleted again; the real size is re-checked once it is on disk, because a
+		// client's `Content-Length` is a claim, not a guarantee.
+		await this.usageService.assertQuota({ bucket, bytes: declaredLength ?? 0 })
+
 		const written = await this.storageService.write(stream)
 
 		try {
 			this.assertContentMd5(contentMd5, written.etag)
+			await this.usageService.assertQuota({ bucket, bytes: written.size })
 		} catch (err) {
 			await this.storageService.delete(written.storagePath)
 			throw err
@@ -346,6 +361,104 @@ export class ObjectsService {
 		return { deleted, errors }
 	}
 
+	/** Removes every key under `prefix`, which is what deleting a folder in the file browser
+	 *  does. In a versioned bucket each key gets a delete marker, exactly as a single
+	 *  `DeleteObject` would - nothing is purged behind the versioning setting's back.
+	 *
+	 *  An empty prefix is refused: "delete everything in the bucket" has to be spelled out as
+	 *  such, not arrived at by leaving a field blank. */
+	async deleteByPrefix({ bucket, prefix, accessKeyId }: {
+		bucket: ObjectsTypes.BucketContext
+		prefix: string
+		accessKeyId?: string
+	}): Promise<ObjectsTypes.DeletePrefixResult> {
+		if (!prefix) throw new ObjectsTypes.InvalidKeyError()
+
+		const rows = await this.db.core
+			.select({ key: coreSchema.object.key })
+			.from(coreSchema.object)
+			.where(and(eq(coreSchema.object.bucketGuid, bucket.guid), this.likePrefix(coreSchema.object.key, prefix)))
+			.orderBy(this.collatedAsc(coreSchema.object.key))
+
+		const result = await this.deleteMany({ bucket, objects: rows.map((row) => ({ key: row.key })), accessKeyId })
+
+		return { deletedCount: result.deleted.length, errors: result.errors }
+	}
+
+	/** Creates the empty, `/`-terminated key that stands in for a folder. S3 has no directories,
+	 *  so this is the marker object every S3 console writes for one. */
+	async createFolder({ bucket, key, accessKeyId }: {
+		bucket: ObjectsTypes.BucketContext
+		key: string
+		accessKeyId?: string
+	}): Promise<ObjectsTypes.PutObjectResult & { key: string }> {
+		const folderKey = key.endsWith(ObjectsTypes.FOLDER_SUFFIX) ? key : `${key}${ObjectsTypes.FOLDER_SUFFIX}`
+		this.assertValidKey(folderKey)
+		if (folderKey === ObjectsTypes.FOLDER_SUFFIX) throw new ObjectsTypes.InvalidKeyError()
+
+		const [existing] = await this.db.core
+			.select({ guid: coreSchema.object.guid })
+			.from(coreSchema.object)
+			.where(and(eq(coreSchema.object.bucketGuid, bucket.guid), eq(coreSchema.object.key, folderKey)))
+			.limit(1)
+
+		if (existing) throw new ObjectsTypes.ObjectAlreadyExistsError()
+
+		const created = await this.put({
+			bucket,
+			key: folderKey,
+			stream: Readable.from([]),
+			accessKeyId,
+			contentType: FOLDER_CONTENT_TYPE,
+			declaredLength: 0,
+		})
+
+		return { ...created, key: folderKey }
+	}
+
+	/** Server-side copy or rename. A source key ending in `/` moves the whole folder: every key
+	 *  under it is re-keyed onto `targetKey`, which keeps a rename in the UI one operation. */
+	async copyKeys({ source, target, sourceKey, targetKey, move, accessKeyId }: {
+		source: ObjectsTypes.BucketContext
+		target: ObjectsTypes.BucketContext
+		sourceKey: string
+		targetKey: string
+		move?: boolean
+		accessKeyId?: string
+	}): Promise<{ copiedCount: number }> {
+		if (!sourceKey || !targetKey) throw new ObjectsTypes.InvalidKeyError()
+		if (source.guid === target.guid && sourceKey === targetKey) throw new ObjectsTypes.InvalidKeyError()
+
+		const isFolder = sourceKey.endsWith(ObjectsTypes.FOLDER_SUFFIX)
+		// Moving a folder into itself would re-key the copies it has just written, forever.
+		if (isFolder && source.guid === target.guid && targetKey.startsWith(sourceKey)) throw new ObjectsTypes.InvalidKeyError()
+
+		const keys = isFolder ? await this.keysUnder({ bucketGuid: source.guid, prefix: sourceKey }) : [sourceKey]
+		if (keys.length === 0) throw new ObjectsTypes.ObjectNotFoundError()
+
+		const targetPrefix = isFolder && !targetKey.endsWith(ObjectsTypes.FOLDER_SUFFIX) ? `${targetKey}${ObjectsTypes.FOLDER_SUFFIX}` : targetKey
+
+		for (const key of keys) {
+			const destination = isFolder ? `${targetPrefix}${key.slice(sourceKey.length)}` : targetPrefix
+			const version = await this.getVersion({ bucketGuid: source.guid, key })
+			if (version.isDeleteMarker) continue
+
+			await this.copy({
+				source: version,
+				target,
+				key: destination,
+				metadataDirective: ObjectsTypes.MetadataDirective.copy,
+				accessKeyId,
+			})
+		}
+
+		if (move) {
+			await this.deleteMany({ bucket: source, objects: keys.map((key) => ({ key })), accessKeyId })
+		}
+
+		return { copiedCount: keys.length }
+	}
+
 	async createMultipartUpload({ bucket, key, accessKeyId, ...headers }: {
 		bucket: ObjectsTypes.BucketContext
 		key: string
@@ -372,20 +485,26 @@ export class ObjectsService {
 	}
 
 	/** Stores one part's bytes. Re-uploading a part number replaces the previous blob. */
-	async uploadPart({ bucketGuid, uploadId, partNumber, stream, contentMd5 }: {
-		bucketGuid: string
+	async uploadPart({ bucket, uploadId, partNumber, stream, contentMd5, declaredLength }: {
+		bucket: ObjectsTypes.BucketContext
 		uploadId: string
 		partNumber: number
 		stream: Readable
 		contentMd5?: string
+		declaredLength?: number
 	}): Promise<{ etag: string, size: number }> {
-		const upload = await this.requireUpload({ bucketGuid, uploadId })
+		const upload = await this.requireUpload({ bucketGuid: bucket.guid, uploadId })
 		if (partNumber < 1 || partNumber > 10_000) throw new ObjectsTypes.InvalidPartError()
+
+		// Parts occupy disk from the moment they land, so they count against the quota now
+		// rather than at `CompleteMultipartUpload`.
+		await this.usageService.assertQuota({ bucket, bytes: declaredLength ?? 0 })
 
 		const written = await this.storageService.write(stream)
 
 		try {
 			this.assertContentMd5(contentMd5, written.etag)
+			await this.usageService.assertQuota({ bucket, bytes: written.size })
 		} catch (err) {
 			await this.storageService.delete(written.storagePath)
 			throw err
@@ -411,8 +530,8 @@ export class ObjectsService {
 	}
 
 	/** `UploadPartCopy`: the part's bytes come from an existing object version. */
-	async uploadPartCopy({ bucketGuid, uploadId, partNumber, source, range }: {
-		bucketGuid: string
+	async uploadPartCopy({ bucket, uploadId, partNumber, source, range }: {
+		bucket: ObjectsTypes.BucketContext
 		uploadId: string
 		partNumber: number
 		source: ObjectsTypes.ObjectVersionDetail
@@ -421,7 +540,7 @@ export class ObjectsService {
 		if (!source.storagePath) throw new ObjectsTypes.ObjectNotFoundError()
 
 		const { stream } = await this.storageService.read(source.storagePath, range)
-		const result = await this.uploadPart({ bucketGuid, uploadId, partNumber, stream })
+		const result = await this.uploadPart({ bucket, uploadId, partNumber, stream })
 
 		return { ...result, lastModified: source.lastModified }
 	}
@@ -697,6 +816,25 @@ export class ObjectsService {
 
 			return removed.map((row) => row.storagePath).filter((path): path is string => Boolean(path))
 		})
+	}
+
+	/** Every key stored under a prefix, in the byte order S3 lists them in. */
+	private async keysUnder({ bucketGuid, prefix }: { bucketGuid: string, prefix: string }): Promise<string[]> {
+		const rows = await this.db.core
+			.select({ key: coreSchema.object.key })
+			.from(coreSchema.object)
+			.where(and(eq(coreSchema.object.bucketGuid, bucketGuid), this.likePrefix(coreSchema.object.key, prefix)))
+			.orderBy(this.collatedAsc(coreSchema.object.key))
+
+		return rows.map((row) => row.key)
+	}
+
+	/** S3's key rules: non-empty, at most 1024 UTF-8 bytes and free of control characters. */
+	private assertValidKey(key: string): void {
+		if (!key) throw new ObjectsTypes.InvalidKeyError()
+		if (Buffer.byteLength(key, 'utf8') > MAX_KEY_BYTES) throw new ObjectsTypes.InvalidKeyError()
+		 
+		if (/[\u0000-\u001f\u007f]/.test(key)) throw new ObjectsTypes.InvalidKeyError()
 	}
 
 	private async requireUpload({ bucketGuid, uploadId }: { bucketGuid: string, uploadId: string }): Promise<typeof coreSchema.multipartUpload.$inferSelect> {

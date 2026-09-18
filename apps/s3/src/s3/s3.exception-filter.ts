@@ -4,6 +4,7 @@ import { ObjectsTypes } from '@storage/domains/objects'
 import { PoliciesTypes } from '@storage/domains/policies'
 import { S3Exception, S3Types, S3XmlService } from '@storage/domains/s3'
 import { StorageTypes } from '@storage/domains/storage'
+import { UsageTypes } from '@storage/domains/usage'
 import { Response } from 'express'
 
 /** Domain errors, in the S3 error code each one means. Services throw framework-free typed
@@ -24,6 +25,12 @@ const DOMAIN_ERRORS: [new (...args: never[]) => Error, S3Types.ErrorCode][] = [
 	[ObjectsTypes.InvalidPartOrderError, 'InvalidPartOrder'],
 	[ObjectsTypes.PartTooSmallError, 'EntityTooSmall'],
 	[ObjectsTypes.BadDigestError, 'BadDigest'],
+	[ObjectsTypes.InvalidKeyError, 'InvalidArgument'],
+	[ObjectsTypes.ObjectAlreadyExistsError, 'InvalidRequest'],
+	// S3 has no quota code of its own; `EntityTooLarge` is what AWS answers when a write would
+	// exceed a configured limit, and SDKs already treat it as non-retryable.
+	[UsageTypes.BucketQuotaExceededError, 'EntityTooLarge'],
+	[UsageTypes.UserQuotaExceededError, 'EntityTooLarge'],
 	[PoliciesTypes.InvalidPolicyDocumentError, 'MalformedPolicy'],
 	[PoliciesTypes.PolicyNotFoundError, 'NoSuchBucketPolicy'],
 	[S3Types.MalformedXmlError, 'MalformedXML'],

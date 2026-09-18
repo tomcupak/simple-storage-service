@@ -15,6 +15,13 @@
       "when": 1789671869662,
       "tag": "0001_add_bucket_cors_and_multipart_headers",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789756913398,
+      "tag": "0002_add_quotas_user_status_and_audit_log",
+      "breakpoints": true
     }
   ]
 }

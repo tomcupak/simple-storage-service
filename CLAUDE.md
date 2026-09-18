@@ -52,7 +52,16 @@ bodies reach the storage service as a raw stream, and SigV4 verification sees th
 - Authorisation on the S3 side runs through `S3AuthorizationService`: the bucket policy decides
   first (Deny wins, then Allow), and only when no statement matches does it fall back to bucket
   ownership, the `bucket_access` grants and the canned `BucketAcl`. Handlers call
-  `resolveBucket({ name, identity, action, key })`, which resolves and authorises in one step.
+  `resolveBucket({ req, name, identity, action, key })`, which resolves and authorises in one step.
+  `req` is what lets `Condition` blocks be evaluated - leave it out and every request-bound
+  condition key (`aws:SourceIp`, `aws:SecureTransport`, `s3:prefix`, ...) counts as missing.
+- `Condition` evaluation lives in `PoliciesService`. A missing context key fails a positive
+  operator and satisfies a negated one (`StringNotEquals`, `NotIpAddress`, ...); an operator the
+  service does not implement never matches, so an unrecognised condition cannot widen an Allow.
+- Only canned ACLs (`BucketAcl`) exist, and only on buckets. `PutBucketAcl` takes `x-amz-acl` or
+  an XML body that reduces to one canned value - a grant list that does not is rejected rather
+  than rounded down. Objects have no ACL: `?acl` on an object key is `NotImplemented`, which
+  `S3RequestService.objectSubResource` is there to enforce.
 
 ## Routing and request shaping
 
@@ -75,6 +84,23 @@ S3 orders keys by raw UTF-8 bytes, which is not what the database's locale colla
 key comparison in `ObjectsService` is forced to `COLLATE "C"`. Keys and common prefixes both count
 towards `max-keys`, so a page is assembled batch by batch: emitting a folder skips everything inside
 it, and the continuation token records whether the page ended on a key or on a folder.
+
+# Quotas and usage
+
+`libs/domains/src/usage` owns both "how much is stored" and "may this write happen". Usage is
+derived from the metadata on every call rather than tracked incrementally, so it cannot drift out
+of step with versions, delete markers and multipart aborts. `ObjectsService` calls
+`assertQuota` twice per write: once on the announced `Content-Length` to refuse an over-quota
+upload before streaming it, and once on the real size afterwards (deleting the blob on failure),
+because a declared length is a claim rather than a guarantee.
+
+# Audit log
+
+Management operations are recorded declaratively: a handler carries `@Audited(AuditAction.x)` and
+`AuditInterceptor` (registered globally in `apps/api`) writes one entry per call, on success and
+on failure alike. The entry is assembled from the request, so handlers stay free of logging code.
+Body and query end up in `detail` with `AuditTypes.REDACTED_FIELDS` masked - the log is readable
+by admins and must never become a place to recover a password or a key from.
 
 # Config files
 
@@ -170,9 +196,15 @@ Services signal domain errors by throwing typed error classes, **not** by return
 unions or `null`/`false` for failure cases. Define them in `<entity>.types.ts` inside the module
 namespace (e.g. `BucketsTypes.BucketNotFoundError` with a `code` property).
 
-The controller catches them and maps to HTTP exceptions via `Api.gatewayException(...)`, ending with
-`throw err` so unexpected errors propagate normally. In `apps/s3` the same domain errors map to
-`S3Exception` instead.
+Both apps translate them centrally, so handlers do **not** wrap service calls in try/catch just to
+remap an error - a new domain error only has to be listed in the filter to reach clients:
+
+- `apps/api`: `ApiExceptionFilter` maps the error class to an HTTP status and answers with the
+  error's own `code`, which is also what the DTO `ErrorCodes` enums are built from.
+- `apps/s3`: `S3ExceptionFilter` maps it to an `S3Types.ErrorCode` and renders the XML `<Error>`.
+
+A handler still uses `Api.gatewayException(...)` where the mapping depends on the endpoint rather
+than on the error - for instance answering "not yours" as a 404 so guids cannot be enumerated.
 
 # Non-null assertions
 
@@ -186,6 +218,14 @@ Every `@ApiProperty()` decorator must include an explicit `type` option. Use pri
 (`'string'`, `'integer'`, `'boolean'`) for scalars, a class reference for nested objects, or `enum`
 for enum fields (where `type` can be omitted). Never leave `@ApiProperty()` empty or with only
 `nullable`/`required`/`description` options.
+
+# Object upload through the management API
+
+`PUT /v1/buckets/:name/objects?key=` takes the object payload as the raw request body, so an
+upload of any size streams straight to `StorageService`. `apps/api` therefore boots with
+`bodyParser: false` and registers the JSON/urlencoded parsers by hand, skipping
+`config.body.rawPathPattern` - otherwise a `.json` file arriving as `application/json` would be
+parsed and its stream drained before the handler ever saw it.
 
 # Frontend
 

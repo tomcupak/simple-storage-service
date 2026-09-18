@@ -6,7 +6,8 @@
  * OpenAPI spec version: 1.0.0
  */
 import type {
-  AccessKeyItem,
+  AccessKeyPage,
+  AccessKeysControllerV1ListV1Params,
   CreateAccessKeyBody,
   CreatedAccessKey,
   SetAccessKeyStatusBody
@@ -18,10 +19,11 @@ import { customInstance } from '../../customInstance';
 
   export const getAccessKeys = () => {
 const accessKeysControllerV1ListV1 = (
-    
+    params?: AccessKeysControllerV1ListV1Params,
  ) => {
-      return customInstance<AccessKeyItem[]>(
-      {url: `/v1/access-keys`, method: 'GET'
+      return customInstance<AccessKeyPage>(
+      {url: `/v1/access-keys`, method: 'GET',
+        params
     },
       );
     }

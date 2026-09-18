@@ -10,7 +10,7 @@ export function UsersPage() {
 	const [error, setError] = useState<string | null>(null)
 
 	const refresh = useCallback(async () => {
-		setUsers(await api.listUsers())
+		setUsers((await api.listUsers()).data)
 	}, [])
 
 	useEffect(() => { void refresh() }, [refresh])

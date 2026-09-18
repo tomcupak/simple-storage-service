@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { coreSchema, DbProvider, DrizzleErrorCode, UserRole } from '@storage/database'
-import { and, count, eq, isNull } from 'drizzle-orm'
+import { coreSchema, DbProvider, DrizzleErrorCode, UserRole, UserStatus } from '@storage/database'
+import { Api } from '@storage/shared'
+import { and, asc, count, eq, isNull } from 'drizzle-orm'
 
 import { AuthService } from '../auth/auth.service'
 import { UsersTypes } from './users.types'
@@ -14,13 +15,21 @@ export class UsersService {
 		private authService: AuthService,
 	) {}
 
-	async list(): Promise<UsersTypes.UserItem[]> {
+	async list({ limit, page }: { limit: number, page: number }): Promise<Api.Pagination<UsersTypes.UserItem>> {
 		const rows = await this.db.core
 			.select()
 			.from(coreSchema.user)
 			.where(isNull(coreSchema.user.deletedAt))
+			.orderBy(asc(coreSchema.user.email))
+			.limit(limit)
+			.offset((page - 1) * limit)
 
-		return rows.map((row) => this.toItem(row))
+		const [{ value: totalRecords }] = await this.db.core
+			.select({ value: count() })
+			.from(coreSchema.user)
+			.where(isNull(coreSchema.user.deletedAt))
+
+		return Api.paginate({ data: rows.map((row) => this.toItem(row)), totalRecords, limit, page })
 	}
 
 	async get(guid: string): Promise<UsersTypes.UserItem> {
@@ -51,6 +60,58 @@ export class UsersService {
 			if (this.isUniqueViolation(err)) throw new UsersTypes.EmailAlreadyUsedError()
 			throw err
 		}
+	}
+
+	/** Renames a user or changes their global role. The last admin cannot be demoted - doing so
+	 *  would leave the deployment with nobody able to manage it. */
+	async update({ guid, name, role }: { guid: string, name?: string | null, role?: UserRole }): Promise<UsersTypes.UserItem> {
+		const user = await this.get(guid)
+
+		if (role && role !== user.role && user.role === UserRole.admin && await this.countAdmins() <= 1) {
+			throw new UsersTypes.LastAdminDemotedError()
+		}
+
+		const [updated] = await this.db.core
+			.update(coreSchema.user)
+			.set({
+				...(name === undefined ? {} : { name }),
+				...(role === undefined ? {} : { role }),
+				updatedAt: new Date(),
+			})
+			.where(and(eq(coreSchema.user.guid, guid), isNull(coreSchema.user.deletedAt)))
+			.returning()
+
+		if (!updated) throw new UsersTypes.UserNotFoundError()
+		return this.toItem(updated)
+	}
+
+	/** Deactivation keeps the account, its buckets and its access keys; only signing in stops.
+	 *  It is the reversible half of `delete`, which soft-deletes the row. */
+	async setStatus(guid: string, status: UserStatus): Promise<void> {
+		const user = await this.get(guid)
+
+		if (status === UserStatus.disabled && user.role === UserRole.admin && await this.countAdmins() <= 1) {
+			throw new UsersTypes.LastAdminDemotedError()
+		}
+
+		const updated = await this.db.core
+			.update(coreSchema.user)
+			.set({ status, updatedAt: new Date() })
+			.where(and(eq(coreSchema.user.guid, guid), isNull(coreSchema.user.deletedAt)))
+			.returning()
+
+		if (updated.length === 0) throw new UsersTypes.UserNotFoundError()
+	}
+
+	/** Storage limit across the buckets this user owns; null lifts it. */
+	async setQuota(guid: string, quotaBytes: number | null): Promise<void> {
+		const updated = await this.db.core
+			.update(coreSchema.user)
+			.set({ quotaBytes, updatedAt: new Date() })
+			.where(and(eq(coreSchema.user.guid, guid), isNull(coreSchema.user.deletedAt)))
+			.returning()
+
+		if (updated.length === 0) throw new UsersTypes.UserNotFoundError()
 	}
 
 	async setPassword(guid: string, password: string): Promise<void> {
@@ -86,11 +147,16 @@ export class UsersService {
 		this.logger.warn(`Bootstrapped initial admin user '${email}' - change the password after first login`)
 	}
 
+	/** Admins who could still sign in - a disabled admin is no safeguard against lock-out. */
 	private async countAdmins(): Promise<number> {
 		const [{ value }] = await this.db.core
 			.select({ value: count() })
 			.from(coreSchema.user)
-			.where(and(eq(coreSchema.user.role, UserRole.admin), isNull(coreSchema.user.deletedAt)))
+			.where(and(
+				eq(coreSchema.user.role, UserRole.admin),
+				eq(coreSchema.user.status, UserStatus.active),
+				isNull(coreSchema.user.deletedAt),
+			))
 		return value
 	}
 
@@ -100,6 +166,8 @@ export class UsersService {
 			email: row.email,
 			name: row.name,
 			role: row.role,
+			status: row.status,
+			quotaBytes: row.quotaBytes,
 			lastLoginAt: row.lastLoginAt,
 			createdAt: row.createdAt,
 		}

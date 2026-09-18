@@ -85,6 +85,7 @@ export namespace S3Types {
 	 *  (`?versioning`, `?uploads`, ...). `none` is the plain operation for the verb. */
 	export enum SubResource {
 		none = 'none',
+		acl = 'acl',
 		cors = 'cors',
 		delete = 'delete',
 		location = 'location',
@@ -98,7 +99,7 @@ export namespace S3Types {
 	/** Sub-resources a real S3 would answer but this deployment does not implement.
 	 *  They must fail as `NotImplemented` rather than fall through to a 404. */
 	export const UNIMPLEMENTED_SUBRESOURCES = [
-		'accelerate', 'acl', 'analytics', 'encryption', 'inventory', 'lifecycle', 'legal-hold', 'logging',
+		'accelerate', 'analytics', 'encryption', 'inventory', 'lifecycle', 'legal-hold', 'logging',
 		'metrics', 'notification', 'object-lock', 'ownershipControls', 'publicAccessBlock',
 		'replication', 'requestPayment', 'restore', 'retention', 'select', 'tagging', 'torrent',
 		'website',
@@ -151,6 +152,7 @@ export namespace S3Types {
 		deleteBucketPolicy = 's3:DeleteBucketPolicy',
 		deleteObject = 's3:DeleteObject',
 		deleteObjectVersion = 's3:DeleteObjectVersion',
+		getBucketAcl = 's3:GetBucketAcl',
 		getBucketCors = 's3:GetBucketCORS',
 		getBucketLocation = 's3:GetBucketLocation',
 		getBucketPolicy = 's3:GetBucketPolicy',
@@ -161,11 +163,18 @@ export namespace S3Types {
 		listBucketMultipartUploads = 's3:ListBucketMultipartUploads',
 		listBucketVersions = 's3:ListBucketVersions',
 		listMultipartUploadParts = 's3:ListMultipartUploadParts',
+		putBucketAcl = 's3:PutBucketAcl',
 		putBucketCors = 's3:PutBucketCORS',
 		putBucketPolicy = 's3:PutBucketPolicy',
 		putBucketVersioning = 's3:PutBucketVersioning',
 		putObject = 's3:PutObject',
 	}
+
+	/** Canned ACL grants a `GetBucketAcl` response spells out, per `BucketAcl`. */
+	export const ACL_GROUP_URIS = {
+		allUsers: 'http://acs.amazonaws.com/groups/global/AllUsers',
+		authenticatedUsers: 'http://acs.amazonaws.com/groups/global/AuthenticatedUsers',
+	} as const
 
 	/** `x-amz-copy-source` split into its parts (`/bucket/key?versionId=...`). */
 	export interface CopySource {

@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common'
 import { AccessKeyStatus, coreSchema, DbProvider, UserRole } from '@storage/database'
+import { Api } from '@storage/shared'
 import * as crypto from 'crypto'
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, asc, count, eq, isNull } from 'drizzle-orm'
 
 import { CryptographicService } from '../cryptographic/cryptographic.service'
 import { AccessKeysTypes } from './access-keys.types'
@@ -16,15 +17,51 @@ export class AccessKeysService {
 		private cryptographicService: CryptographicService,
 	) {}
 
-	async list(userGuid?: string): Promise<AccessKeysTypes.AccessKeyItem[]> {
+	async list({ userGuid, limit, page }: { userGuid?: string, limit: number, page: number }): Promise<Api.Pagination<AccessKeysTypes.AccessKeyItem>> {
+		const where = userGuid
+			? and(eq(coreSchema.accessKey.userGuid, userGuid), isNull(coreSchema.accessKey.deletedAt))
+			: isNull(coreSchema.accessKey.deletedAt)
+
 		const rows = await this.db.core
 			.select()
 			.from(coreSchema.accessKey)
-			.where(userGuid
-				? and(eq(coreSchema.accessKey.userGuid, userGuid), isNull(coreSchema.accessKey.deletedAt))
-				: isNull(coreSchema.accessKey.deletedAt))
+			.where(where)
+			.orderBy(asc(coreSchema.accessKey.createdAt))
+			.limit(limit)
+			.offset((page - 1) * limit)
 
-		return rows.map((row) => this.toItem(row))
+		const [{ value: totalRecords }] = await this.db.core
+			.select({ value: count() })
+			.from(coreSchema.accessKey)
+			.where(where)
+
+		return Api.paginate({ data: rows.map((row) => this.toItem(row)), totalRecords, limit, page })
+	}
+
+	/** Credentials the management API signs a presigned URL with on the user's behalf: their
+	 *  oldest usable key, so the same link keeps working as newer keys come and go.
+	 *
+	 *  Signing with the user's own key is what makes the link carry their permissions - the S3
+	 *  endpoint has no notion of the management session the UI holds. */
+	async resolveSigningCredentials(userGuid: string): Promise<AccessKeysTypes.ResolvedCredentials> {
+		const rows = await this.db.core
+			.select()
+			.from(coreSchema.accessKey)
+			.where(and(
+				eq(coreSchema.accessKey.userGuid, userGuid),
+				eq(coreSchema.accessKey.status, AccessKeyStatus.active),
+				isNull(coreSchema.accessKey.deletedAt),
+			))
+			.orderBy(asc(coreSchema.accessKey.createdAt))
+
+		const usable = rows.find((row) => !row.expiresAt || row.expiresAt.getTime() > Date.now())
+		if (!usable) throw new AccessKeysTypes.NoUsableAccessKeyError()
+
+		return {
+			accessKeyId: usable.accessKeyId,
+			secretAccessKey: this.cryptographicService.decrypt(usable.secretKeyEncrypted),
+			userGuid: usable.userGuid,
+		}
 	}
 
 	async create({ userGuid, description, expiresAt }: { userGuid: string, description?: string, expiresAt?: Date }): Promise<AccessKeysTypes.CreatedAccessKey> {

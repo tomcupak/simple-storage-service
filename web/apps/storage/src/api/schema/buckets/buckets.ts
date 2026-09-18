@@ -6,10 +6,15 @@
  * OpenAPI spec version: 1.0.0
  */
 import type {
+  BucketDetail,
   BucketGrantItem,
   BucketItem,
   CreateBucketBody,
-  SetBucketGrantBody
+  SetBucketAclBody,
+  SetBucketGrantBody,
+  SetBucketVersioningBody,
+  SetQuotaBody,
+  UsageItem
 } from '.././models';
 
 import { customInstance } from '../../customInstance';
@@ -38,7 +43,7 @@ const bucketsControllerV1ListV1 = (
   const bucketsControllerV1GetV1 = (
     bucketName: string,
  ) => {
-      return customInstance<BucketItem>(
+      return customInstance<BucketDetail>(
       {url: `/v1/buckets/${bucketName}`, method: 'GET'
     },
       );
@@ -48,6 +53,47 @@ const bucketsControllerV1ListV1 = (
  ) => {
       return customInstance<unknown>(
       {url: `/v1/buckets/${bucketName}`, method: 'DELETE'
+    },
+      );
+    }
+  const bucketsControllerV1SetAclV1 = (
+    bucketName: string,
+    setBucketAclBody: SetBucketAclBody,
+ ) => {
+      return customInstance<unknown>(
+      {url: `/v1/buckets/${bucketName}/acl`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: setBucketAclBody
+    },
+      );
+    }
+  const bucketsControllerV1SetVersioningV1 = (
+    bucketName: string,
+    setBucketVersioningBody: SetBucketVersioningBody,
+ ) => {
+      return customInstance<unknown>(
+      {url: `/v1/buckets/${bucketName}/versioning`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: setBucketVersioningBody
+    },
+      );
+    }
+  const bucketsControllerV1SetQuotaV1 = (
+    bucketName: string,
+    setQuotaBody: SetQuotaBody,
+ ) => {
+      return customInstance<unknown>(
+      {url: `/v1/buckets/${bucketName}/quota`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: setQuotaBody
+    },
+      );
+    }
+  const bucketsControllerV1UsageV1 = (
+    bucketName: string,
+ ) => {
+      return customInstance<UsageItem>(
+      {url: `/v1/buckets/${bucketName}/usage`, method: 'GET'
     },
       );
     }
@@ -79,11 +125,15 @@ const bucketsControllerV1ListV1 = (
     },
       );
     }
-  return {bucketsControllerV1ListV1,bucketsControllerV1CreateV1,bucketsControllerV1GetV1,bucketsControllerV1DeleteV1,bucketsControllerV1ListGrantsV1,bucketsControllerV1SetGrantV1,bucketsControllerV1RemoveGrantV1}};
+  return {bucketsControllerV1ListV1,bucketsControllerV1CreateV1,bucketsControllerV1GetV1,bucketsControllerV1DeleteV1,bucketsControllerV1SetAclV1,bucketsControllerV1SetVersioningV1,bucketsControllerV1SetQuotaV1,bucketsControllerV1UsageV1,bucketsControllerV1ListGrantsV1,bucketsControllerV1SetGrantV1,bucketsControllerV1RemoveGrantV1}};
 export type BucketsControllerV1ListV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1ListV1']>>>
 export type BucketsControllerV1CreateV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1CreateV1']>>>
 export type BucketsControllerV1GetV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1GetV1']>>>
 export type BucketsControllerV1DeleteV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1DeleteV1']>>>
+export type BucketsControllerV1SetAclV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1SetAclV1']>>>
+export type BucketsControllerV1SetVersioningV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1SetVersioningV1']>>>
+export type BucketsControllerV1SetQuotaV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1SetQuotaV1']>>>
+export type BucketsControllerV1UsageV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1UsageV1']>>>
 export type BucketsControllerV1ListGrantsV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1ListGrantsV1']>>>
 export type BucketsControllerV1SetGrantV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1SetGrantV1']>>>
 export type BucketsControllerV1RemoveGrantV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1RemoveGrantV1']>>>

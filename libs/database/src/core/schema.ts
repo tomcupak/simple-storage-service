@@ -14,15 +14,18 @@ import {
 	varchar,
 } from 'drizzle-orm/pg-core'
 
-import { AccessKeyStatus, BucketAcl, BucketPermission, BucketVersioning, MultipartUploadStatus, StorageClass, UserRole } from './types'
+import { AccessKeyStatus, AuditAction, AuditResult, BucketAcl, BucketPermission, BucketVersioning, MultipartUploadStatus, StorageClass, UserRole, UserStatus } from './types'
 
 export const userRoleType = pgEnum('user_role_type', UserRole)
+export const userStatusType = pgEnum('user_status_type', UserStatus)
 export const bucketPermissionType = pgEnum('bucket_permission_type', BucketPermission)
 export const accessKeyStatusType = pgEnum('access_key_status_type', AccessKeyStatus)
 export const bucketAclType = pgEnum('bucket_acl_type', BucketAcl)
 export const bucketVersioningType = pgEnum('bucket_versioning_type', BucketVersioning)
 export const storageClassType = pgEnum('storage_class_type', StorageClass)
 export const multipartUploadStatusType = pgEnum('multipart_upload_status_type', MultipartUploadStatus)
+export const auditActionType = pgEnum('audit_action_type', AuditAction)
+export const auditResultType = pgEnum('audit_result_type', AuditResult)
 
 const createdAt = timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
 const updatedAt = timestamp('updated_at', { withTimezone: true })
@@ -34,6 +37,9 @@ export const user = pgTable('user', {
 	name: varchar('name'),
 	passwordHash: varchar('password_hash').notNull(),
 	role: userRoleType('role').notNull().default(UserRole.user),
+	status: userStatusType('status').notNull().default(UserStatus.active),
+	/** Maximum bytes this user's buckets may hold together; null means no limit. */
+	quotaBytes: bigint('quota_bytes', { mode: 'number' }),
 	lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
 	createdAt,
 	updatedAt,
@@ -79,6 +85,8 @@ export const bucket = pgTable('bucket', {
 	region: varchar('region').notNull().default('us-east-1'),
 	acl: bucketAclType('acl').notNull().default(BucketAcl.private),
 	versioning: bucketVersioningType('versioning').notNull().default(BucketVersioning.disabled),
+	/** Maximum bytes this bucket may hold; null means no limit. */
+	quotaBytes: bigint('quota_bytes', { mode: 'number' }),
 	/** `CORSConfiguration` rules set through `PutBucketCors`; null means no CORS is configured. */
 	cors: jsonb('cors'),
 	createdAt,
@@ -178,4 +186,28 @@ export const multipartPart = pgTable('multipart_part', {
 	createdAt,
 }, (t) => [
 	primaryKey({ columns: [t.uploadGuid, t.partNumber] }),
+])
+
+/** Append-only record of who changed what through the management API. Written outside the
+ *  audited operation's transaction, so a failed write never rolls the operation back. */
+export const auditLog = pgTable('audit_log', {
+	guid: uuid('guid').primaryKey().defaultRandom(),
+	action: auditActionType('action').notNull(),
+	result: auditResultType('result').notNull().default(AuditResult.success),
+	/** Null for an operation attempted without a resolvable identity (a failed login). */
+	userGuid: uuid('user_guid').references(() => user.guid),
+	/** Email as it was at the time - the user row may later be renamed or deleted. */
+	userEmail: varchar('user_email'),
+	bucketName: varchar('bucket_name'),
+	objectKey: varchar('object_key'),
+	targetGuid: uuid('target_guid'),
+	sourceIp: varchar('source_ip'),
+	userAgent: varchar('user_agent'),
+	/** Operation-specific payload (new role, permissions granted, byte counts, ...). */
+	detail: jsonb('detail'),
+	createdAt,
+}, (t) => [
+	index('idx_audit_log_created_at').on(t.createdAt),
+	index('idx_audit_log_user').on(t.userGuid),
+	index('idx_audit_log_bucket').on(t.bucketName),
 ])

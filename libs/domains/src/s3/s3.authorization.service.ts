@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { BucketAcl, BucketPermission, UserRole } from '@storage/database'
+import { Request } from 'express'
 
 import { BucketsService } from '../buckets/buckets.service'
 import { BucketsTypes } from '../buckets/buckets.types'
@@ -8,6 +9,7 @@ import { ObjectsTypes } from '../objects/objects.types'
 import { PoliciesService } from '../policies/policies.service'
 import { PoliciesTypes } from '../policies/policies.types'
 import { S3Exception } from './s3.exception'
+import { S3RequestService } from './s3.request.service'
 import { S3Types } from './s3.types'
 
 /** Management permission an action needs when no policy statement decides it. */
@@ -18,6 +20,9 @@ const ACTION_PERMISSIONS: Record<S3Types.Action, BucketPermission> = {
 	[S3Types.Action.deleteBucketPolicy]: BucketPermission.manage,
 	[S3Types.Action.deleteObject]: BucketPermission.delete,
 	[S3Types.Action.deleteObjectVersion]: BucketPermission.delete,
+	// Reading who may reach a bucket is a management operation here, as `GetBucketPolicy` is -
+	// a canned `public-read` opens up the objects, not the bucket's access configuration.
+	[S3Types.Action.getBucketAcl]: BucketPermission.manage,
 	[S3Types.Action.getBucketCors]: BucketPermission.read,
 	[S3Types.Action.getBucketLocation]: BucketPermission.read,
 	[S3Types.Action.getBucketPolicy]: BucketPermission.manage,
@@ -28,6 +33,7 @@ const ACTION_PERMISSIONS: Record<S3Types.Action, BucketPermission> = {
 	[S3Types.Action.listBucketMultipartUploads]: BucketPermission.read,
 	[S3Types.Action.listBucketVersions]: BucketPermission.read,
 	[S3Types.Action.listMultipartUploadParts]: BucketPermission.read,
+	[S3Types.Action.putBucketAcl]: BucketPermission.manage,
 	[S3Types.Action.putBucketCors]: BucketPermission.manage,
 	[S3Types.Action.putBucketPolicy]: BucketPermission.manage,
 	[S3Types.Action.putBucketVersioning]: BucketPermission.manage,
@@ -38,35 +44,43 @@ const ACTION_PERMISSIONS: Record<S3Types.Action, BucketPermission> = {
  *
  *  The bucket policy comes first, exactly as in AWS: an explicit Deny ends the request, an
  *  Allow lets it through. When no statement matches, the fallback is ownership, the bucket's
- *  management grants and its canned ACL. `Condition` evaluation is not wired up yet. */
+ *  management grants and its canned ACL.
+ *
+ *  Handlers hand in the live request so `Condition` blocks can be evaluated against it
+ *  (`aws:SourceIp`, `aws:SecureTransport`, `s3:prefix`, ...); without it only the identity
+ *  keys are resolvable and every request-bound condition counts as missing. */
 @Injectable()
 export class S3AuthorizationService {
 	constructor(
 		private readonly bucketsService: BucketsService,
 		private readonly policiesService: PoliciesService,
 		private readonly objectsService: ObjectsService,
+		private readonly requestService: S3RequestService,
 	) {}
 
 	/** Resolves the bucket an operation names and authorises the operation in one step - the
 	 *  shape every bucket- and object-level handler starts with. */
-	async resolveBucket({ name, identity, action, key }: {
+	async resolveBucket({ req, name, identity, action, key }: {
+		req?: Request
 		name: string
 		identity: S3Types.RequestIdentity
 		action: S3Types.Action
 		key?: string
 	}): Promise<BucketsTypes.BucketItem> {
 		const bucket = await this.bucketsService.getByName(name)
-		await this.authorize({ identity, bucket, action, key })
+		await this.authorize({ req, identity, bucket, action, key })
 		return bucket
 	}
 
 	/** Resolves the version a `CopyObject`/`UploadPartCopy` reads from, authorising the read
 	 *  against the source bucket - which may be a different one than the target. */
-	async resolveCopySource({ source, identity }: {
+	async resolveCopySource({ req, source, identity }: {
+		req?: Request
 		source: S3Types.CopySource
 		identity: S3Types.RequestIdentity
 	}): Promise<ObjectsTypes.ObjectVersionDetail> {
 		const bucket = await this.resolveBucket({
+			req,
 			name: source.bucket,
 			identity,
 			action: source.versionId ? S3Types.Action.getObjectVersion : S3Types.Action.getObject,
@@ -80,7 +94,8 @@ export class S3AuthorizationService {
 	}
 
 	/** Throws `AccessDenied` unless the identity may perform `action` on the bucket (or key). */
-	async authorize({ identity, bucket, action, key }: {
+	async authorize({ req, identity, bucket, action, key }: {
+		req?: Request
 		identity: S3Types.RequestIdentity
 		bucket: BucketsTypes.BucketItem
 		action: S3Types.Action
@@ -92,6 +107,7 @@ export class S3AuthorizationService {
 			resource: this.resourceArn({ bucket: bucket.name, key }),
 			principalUserGuid: identity.anonymous ? undefined : identity.userGuid,
 			accessKeyId: identity.anonymous ? undefined : identity.accessKeyId,
+			context: this.policyContext({ req, identity }),
 		})
 
 		if (decision === PoliciesTypes.Decision.deny) throw new S3Exception('AccessDenied', key ?? bucket.name)
@@ -106,6 +122,18 @@ export class S3AuthorizationService {
 	/** `arn:aws:s3:::<bucket>` for bucket-level actions, `.../<key>` for object-level ones. */
 	resourceArn({ bucket, key }: { bucket: string, key?: string }): string {
 		return key ? `arn:aws:s3:::${bucket}/${key}` : `arn:aws:s3:::${bucket}`
+	}
+
+	/** Request-derived condition keys plus the ones only the resolved identity knows. */
+	private policyContext({ req, identity }: {
+		req?: Request
+		identity: S3Types.RequestIdentity
+	}): PoliciesTypes.PolicyContext {
+		return {
+			...(req ? this.requestService.policyContext(req) : {}),
+			[PoliciesTypes.ConditionKeys.username]: identity.anonymous ? undefined : identity.userGuid,
+			[PoliciesTypes.ConditionKeys.userId]: identity.anonymous ? undefined : identity.accessKeyId,
+		}
 	}
 
 	private async allowedByOwnershipOrAcl({ identity, bucket, permission }: {

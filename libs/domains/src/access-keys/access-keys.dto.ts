@@ -7,6 +7,8 @@ export namespace AccessKeysDto {
 	export enum ErrorCodes {
 		ACCESS_KEY_NOT_FOUND = 'access_key_not_found',
 		ACCESS_KEY_INACTIVE = 'access_key_inactive',
+		NO_USABLE_ACCESS_KEY = 'no_usable_access_key',
+		PERMISSION_DENIED = 'permission_denied',
 	}
 
 	export class AccessKeyItem {
@@ -60,5 +62,11 @@ export namespace AccessKeysDto {
 		declare status: AccessKeyStatus
 	}
 
+	export class AccessKeyPage extends Api.PaginatedDataDto<AccessKeyItem> {
+		@ApiProperty({ type: AccessKeyItem, isArray: true })
+		declare data: AccessKeyItem[]
+	}
+
 	export class AccessKeyNotFoundError extends Api.createErrorDto([ErrorCodes.ACCESS_KEY_NOT_FOUND]) {}
+	export class AccessKeyForbiddenError extends Api.createErrorDto([ErrorCodes.PERMISSION_DENIED]) {}
 }

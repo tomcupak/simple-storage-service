@@ -26,10 +26,15 @@ export namespace ObjectsTypes {
 		storageClass?: StorageClass
 	}
 
-	/** The bucket an object operation runs against, in the terms the operation needs. */
+	/** The bucket an object operation runs against, in the terms the operation needs.
+	 *  `BucketsTypes.BucketItem` satisfies it, so handlers pass the resolved bucket straight in. */
 	export interface BucketContext {
 		guid: string
 		versioning: BucketVersioning
+		/** Whose user quota a write is charged against. */
+		ownerUserGuid: string
+		/** Bucket quota in bytes; null means unlimited. */
+		quotaBytes: number | null
 	}
 
 	export interface PutObjectParams extends ObjectHeaders {
@@ -39,6 +44,9 @@ export namespace ObjectsTypes {
 		/** Base64 `Content-MD5` the client claims for the payload, verified after the write. */
 		contentMd5?: string
 		accessKeyId?: string
+		/** Size the client announced, used to reject an over-quota write before it is streamed.
+		 *  The real size is checked again once the payload is on disk. */
+		declaredLength?: number
 	}
 
 	export interface PutObjectResult {
@@ -198,6 +206,16 @@ export namespace ObjectsTypes {
 		etag: string
 	}
 
+	/** What a recursive `DeleteObjects`-by-prefix removed. */
+	export interface DeletePrefixResult {
+		deletedCount: number
+		errors: DeleteErrorEntry[]
+	}
+
+	/** A key ending in `/` with an empty payload - what the UI shows as a folder. S3 has no
+	 *  folders, so this is the convention every S3 console uses. */
+	export const FOLDER_SUFFIX = '/'
+
 	export class ObjectNotFoundError extends Error { public code = 'object_not_found' }
 	export class VersionNotFoundError extends Error { public code = 'version_not_found' }
 	export class InvalidRangeError extends Error { public code = 'invalid_range' }
@@ -206,4 +224,6 @@ export namespace ObjectsTypes {
 	export class InvalidPartOrderError extends Error { public code = 'invalid_part_order' }
 	export class PartTooSmallError extends Error { public code = 'part_too_small' }
 	export class BadDigestError extends Error { public code = 'bad_digest' }
+	export class InvalidKeyError extends Error { public code = 'invalid_key' }
+	export class ObjectAlreadyExistsError extends Error { public code = 'object_already_exists' }
 }

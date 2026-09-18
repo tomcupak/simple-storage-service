@@ -1,3 +1,4 @@
+import { BucketAcl } from '@storage/database'
 import { XMLBuilder, XMLParser } from 'fast-xml-parser'
 
 import { S3Types } from './s3.types'
@@ -114,6 +115,72 @@ export class S3XmlService {
 				MaxAgeSeconds: rule.maxAgeSeconds,
 			})),
 		})
+	}
+
+	/** The `AccessControlPolicy` a `GetBucketAcl` answers with. This deployment stores only the
+	 *  canned ACL, so the grant list is the expansion of that one value. */
+	static buildAccessControlPolicy({ acl, ownerId }: { acl: BucketAcl, ownerId: string }): string {
+		const grants: Record<string, unknown>[] = [{
+			Grantee: { '@_xmlns:xsi': 'http://www.w3.org/2001/XMLSchema-instance', '@_xsi:type': 'CanonicalUser', ID: ownerId },
+			Permission: 'FULL_CONTROL',
+		}]
+
+		const group = (uri: string, permission: string): Record<string, unknown> => ({
+			Grantee: { '@_xmlns:xsi': 'http://www.w3.org/2001/XMLSchema-instance', '@_xsi:type': 'Group', URI: uri },
+			Permission: permission,
+		})
+
+		if (acl === BucketAcl.publicRead || acl === BucketAcl.publicReadWrite) grants.push(group(S3Types.ACL_GROUP_URIS.allUsers, 'READ'))
+		if (acl === BucketAcl.publicReadWrite) grants.push(group(S3Types.ACL_GROUP_URIS.allUsers, 'WRITE'))
+		if (acl === BucketAcl.authenticatedRead) grants.push(group(S3Types.ACL_GROUP_URIS.authenticatedUsers, 'READ'))
+
+		return this.build('AccessControlPolicy', {
+			Owner: { ID: ownerId, DisplayName: ownerId },
+			AccessControlList: { Grant: grants },
+		})
+	}
+
+	/** `PutBucketAcl` with an XML body, reduced to the canned ACL that expands to the same
+	 *  grants. A grant list this deployment cannot express is rejected rather than rounded down,
+	 *  so a client never believes it stored something narrower than it did. */
+	static parseAccessControlPolicy(xml: string): BucketAcl {
+		const document = this.parseRoot(xml, 'AccessControlPolicy')
+		const list = document.AccessControlList
+		const grants = this.toArray(typeof list === 'object' && !Array.isArray(list) ? list.Grant : undefined)
+
+		let publicRead = false
+		let publicWrite = false
+		let authenticatedRead = false
+
+		for (const grant of grants) {
+			const grantee = this.toArray(grant.Grantee)[0] ?? {}
+			const uri = this.text(grantee.URI)
+			const permission = this.text(grant.Permission).toUpperCase()
+
+			// A grant to a named user is the owner's own FULL_CONTROL, which every canned ACL has.
+			if (!uri) continue
+
+			const isRead = permission === 'READ' || permission === 'FULL_CONTROL'
+			const isWrite = permission === 'WRITE' || permission === 'FULL_CONTROL'
+
+			if (uri === S3Types.ACL_GROUP_URIS.allUsers) {
+				publicRead ||= isRead
+				publicWrite ||= isWrite
+				continue
+			}
+			if (uri === S3Types.ACL_GROUP_URIS.authenticatedUsers) {
+				authenticatedRead ||= isRead
+				if (isWrite) throw new S3Types.MalformedXmlError()
+				continue
+			}
+
+			throw new S3Types.MalformedXmlError()
+		}
+
+		if (publicWrite) return BucketAcl.publicReadWrite
+		if (publicRead) return BucketAcl.publicRead
+		if (authenticatedRead) return BucketAcl.authenticatedRead
+		return BucketAcl.private
 	}
 
 	/** Leaf text of an element, which an empty element or a missing one reduces to `''`. */

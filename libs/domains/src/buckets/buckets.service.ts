@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { BucketPermission, BucketVersioning, coreSchema, DbProvider, DrizzleErrorCode, UserRole } from '@storage/database'
+import { BucketAcl, BucketPermission, BucketVersioning, coreSchema, DbProvider, DrizzleErrorCode, UserRole } from '@storage/database'
 import { and, count, eq, isNull } from 'drizzle-orm'
 
 import { S3Types } from '../s3/s3.types'
@@ -114,6 +114,23 @@ export class BucketsService {
 		await this.db.core
 			.update(coreSchema.bucket)
 			.set({ versioning, updatedAt: new Date() })
+			.where(eq(coreSchema.bucket.guid, guid))
+	}
+
+	/** `PutBucketAcl`. Only the canned ACLs are stored - a per-grantee ACL has no representation
+	 *  here, so the S3 layer rejects one rather than narrowing it silently. */
+	async setAcl({ guid, acl }: { guid: string, acl: BucketAcl }): Promise<void> {
+		await this.db.core
+			.update(coreSchema.bucket)
+			.set({ acl, updatedAt: new Date() })
+			.where(eq(coreSchema.bucket.guid, guid))
+	}
+
+	/** Bucket-level storage limit in bytes; null lifts it. Enforced by `UsageService` on write. */
+	async setQuota({ guid, quotaBytes }: { guid: string, quotaBytes: number | null }): Promise<void> {
+		await this.db.core
+			.update(coreSchema.bucket)
+			.set({ quotaBytes, updatedAt: new Date() })
 			.where(eq(coreSchema.bucket.guid, guid))
 	}
 
@@ -235,6 +252,7 @@ export class BucketsService {
 			region: row.region,
 			acl: row.acl,
 			versioning: row.versioning,
+			quotaBytes: row.quotaBytes,
 			cors: (row.cors as S3Types.CorsConfiguration | null) ?? null,
 			createdAt: row.createdAt,
 		}

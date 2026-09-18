@@ -1,8 +1,10 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, HttpCode, HttpStatus, NotFoundException, Param, Post, Put, Version } from '@nestjs/common'
+import { BadRequestException, Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, Put, Version } from '@nestjs/common'
 import { ApiBadRequestResponse, ApiBearerAuth, ApiForbiddenResponse, ApiNotFoundResponse, ApiOkResponse, ApiTags } from '@nestjs/swagger'
-import { BucketPermission } from '@storage/database'
+import { AuditAction, BucketPermission, BucketVersioning, UserRole } from '@storage/database'
+import { Audited } from '@storage/domains/audit'
 import { AuthTypes, AuthUser, SecuredEp } from '@storage/domains/auth'
-import { BucketsDto, BucketsService, BucketsTypes } from '@storage/domains/buckets'
+import { BucketsDto, BucketsService } from '@storage/domains/buckets'
+import { UsageDto, UsageService } from '@storage/domains/usage'
 import { Api } from '@storage/shared'
 
 @ApiTags('buckets')
@@ -11,6 +13,7 @@ import { Api } from '@storage/shared'
 export class BucketsControllerV1 {
 	constructor(
 		private readonly bucketsService: BucketsService,
+		private readonly usageService: UsageService,
 	) {}
 
 	@Get()
@@ -24,59 +27,100 @@ export class BucketsControllerV1 {
 	@Post()
 	@Version('1')
 	@SecuredEp()
+	@Audited(AuditAction.bucketCreate)
 	@ApiOkResponse({ type: BucketsDto.BucketItem })
 	@ApiBadRequestResponse({ type: BucketsDto.CreateBucketBadRequestError })
-	async create(@Body() body: BucketsDto.CreateBucketBody, @AuthUser() user: AuthTypes.Identity): Promise<BucketsDto.BucketItem> {
-		try {
-			return await this.bucketsService.create({
-				name: body.name,
-				ownerUserGuid: user.guid,
-				region: body.region ?? 'us-east-1',
-			})
-		} catch (err) {
-			if (err instanceof BucketsTypes.InvalidBucketNameError)
-				throw Api.gatewayException(BadRequestException, BucketsDto.ErrorCodes.INVALID_BUCKET_NAME)
-			if (err instanceof BucketsTypes.BucketAlreadyExistsError)
-				throw Api.gatewayException(BadRequestException, BucketsDto.ErrorCodes.BUCKET_ALREADY_EXISTS)
-			throw err
-		}
+	create(@Body() body: BucketsDto.CreateBucketBody, @AuthUser() user: AuthTypes.Identity): Promise<BucketsDto.BucketItem> {
+		return this.bucketsService.create({
+			name: body.name,
+			ownerUserGuid: user.guid,
+			region: body.region ?? 'us-east-1',
+		})
 	}
 
 	@Get(':bucketName')
 	@Version('1')
 	@SecuredEp()
-	@ApiOkResponse({ type: BucketsDto.BucketItem })
+	@ApiOkResponse({ type: BucketsDto.BucketDetail })
 	@ApiNotFoundResponse({ type: BucketsDto.BucketNotFoundError })
-	async get(@Param('bucketName') bucketName: string, @AuthUser() user: AuthTypes.Identity): Promise<BucketsDto.BucketItem> {
-		try {
-			return await this.bucketsService.getForUser({ name: bucketName, userGuid: user.guid, role: user.role, permission: BucketPermission.read })
-		} catch (err) {
-			if (err instanceof BucketsTypes.BucketNotFoundError)
-				throw Api.gatewayException(NotFoundException, BucketsDto.ErrorCodes.BUCKET_NOT_FOUND)
-			throw err
-		}
+	async get(@Param('bucketName') bucketName: string, @AuthUser() user: AuthTypes.Identity): Promise<BucketsDto.BucketDetail> {
+		const bucket = await this.bucketsService.getForUser({ name: bucketName, userGuid: user.guid, role: user.role, permission: BucketPermission.read })
+		const usage = await this.usageService.bucketUsage(bucket.guid)
+
+		return { ...bucket, usage }
 	}
 
 	@Delete(':bucketName')
 	@Version('1')
 	@SecuredEp()
+	@Audited(AuditAction.bucketDelete)
 	@HttpCode(HttpStatus.NO_CONTENT)
 	@ApiNotFoundResponse({ type: BucketsDto.BucketNotFoundError })
 	@ApiForbiddenResponse({ type: BucketsDto.BucketForbiddenError })
 	@ApiBadRequestResponse({ type: BucketsDto.DeleteBucketBadRequestError })
 	async delete(@Param('bucketName') bucketName: string, @AuthUser() user: AuthTypes.Identity): Promise<void> {
-		try {
-			const bucket = await this.bucketsService.getForUser({ name: bucketName, userGuid: user.guid, role: user.role, permission: BucketPermission.manage })
-			await this.bucketsService.delete(bucket.guid)
-		} catch (err) {
-			if (err instanceof BucketsTypes.BucketNotFoundError)
-				throw Api.gatewayException(NotFoundException, BucketsDto.ErrorCodes.BUCKET_NOT_FOUND)
-			if (err instanceof BucketsTypes.PermissionDeniedError)
-				throw Api.gatewayException(ForbiddenException, BucketsDto.ErrorCodes.PERMISSION_DENIED)
-			if (err instanceof BucketsTypes.BucketNotEmptyError)
-				throw Api.gatewayException(BadRequestException, BucketsDto.ErrorCodes.BUCKET_NOT_EMPTY)
-			throw err
+		const bucket = await this.bucketsService.getForUser({ name: bucketName, userGuid: user.guid, role: user.role, permission: BucketPermission.manage })
+		await this.bucketsService.delete(bucket.guid)
+	}
+
+	@Put(':bucketName/acl')
+	@Version('1')
+	@SecuredEp()
+	@Audited(AuditAction.bucketSetAcl)
+	@HttpCode(HttpStatus.NO_CONTENT)
+	@ApiNotFoundResponse({ type: BucketsDto.BucketNotFoundError })
+	@ApiForbiddenResponse({ type: BucketsDto.BucketForbiddenError })
+	async setAcl(
+		@Param('bucketName') bucketName: string,
+		@Body() body: BucketsDto.SetBucketAclBody,
+		@AuthUser() user: AuthTypes.Identity,
+	): Promise<void> {
+		const bucket = await this.bucketsService.getForUser({ name: bucketName, userGuid: user.guid, role: user.role, permission: BucketPermission.manage })
+		await this.bucketsService.setAcl({ guid: bucket.guid, acl: body.acl })
+	}
+
+	@Put(':bucketName/versioning')
+	@Version('1')
+	@SecuredEp()
+	@Audited(AuditAction.bucketSetVersioning)
+	@HttpCode(HttpStatus.NO_CONTENT)
+	@ApiNotFoundResponse({ type: BucketsDto.BucketNotFoundError })
+	@ApiForbiddenResponse({ type: BucketsDto.BucketForbiddenError })
+	@ApiBadRequestResponse({ type: BucketsDto.SetVersioningBadRequestError })
+	async setVersioning(
+		@Param('bucketName') bucketName: string,
+		@Body() body: BucketsDto.SetBucketVersioningBody,
+		@AuthUser() user: AuthTypes.Identity,
+	): Promise<void> {
+		// S3 never returns to `disabled`: versions already recorded would become unreachable.
+		if (body.versioning === BucketVersioning.disabled) {
+			throw Api.gatewayException(BadRequestException, BucketsDto.ErrorCodes.INVALID_VERSIONING)
 		}
+
+		const bucket = await this.bucketsService.getForUser({ name: bucketName, userGuid: user.guid, role: user.role, permission: BucketPermission.manage })
+		await this.bucketsService.setVersioning({ guid: bucket.guid, versioning: body.versioning })
+	}
+
+	@Put(':bucketName/quota')
+	@Version('1')
+	@SecuredEp([UserRole.admin])
+	@Audited(AuditAction.bucketSetQuota)
+	@HttpCode(HttpStatus.NO_CONTENT)
+	@ApiNotFoundResponse({ type: BucketsDto.BucketNotFoundError })
+	async setQuota(@Param('bucketName') bucketName: string, @Body() body: UsageDto.SetQuotaBody): Promise<void> {
+		const bucket = await this.bucketsService.getByName(bucketName)
+		await this.bucketsService.setQuota({ guid: bucket.guid, quotaBytes: body.quotaBytes ?? null })
+	}
+
+	@Get(':bucketName/usage')
+	@Version('1')
+	@SecuredEp()
+	@ApiOkResponse({ type: UsageDto.UsageItem })
+	@ApiNotFoundResponse({ type: BucketsDto.BucketNotFoundError })
+	async usage(@Param('bucketName') bucketName: string, @AuthUser() user: AuthTypes.Identity): Promise<UsageDto.UsageItem> {
+		const bucket = await this.bucketsService.getForUser({ name: bucketName, userGuid: user.guid, role: user.role, permission: BucketPermission.read })
+
+		return this.usageService.bucketUsage(bucket.guid)
 	}
 
 	@Get(':bucketName/grants')
@@ -86,22 +130,16 @@ export class BucketsControllerV1 {
 	@ApiNotFoundResponse({ type: BucketsDto.BucketNotFoundError })
 	@ApiForbiddenResponse({ type: BucketsDto.BucketForbiddenError })
 	async listGrants(@Param('bucketName') bucketName: string, @AuthUser() user: AuthTypes.Identity): Promise<BucketsDto.BucketGrantItem[]> {
-		try {
-			const bucket = await this.bucketsService.getForUser({ name: bucketName, userGuid: user.guid, role: user.role, permission: BucketPermission.manage })
-			const grants = await this.bucketsService.listGrants(bucket.guid)
-			return grants.map((grant) => ({ userGuid: grant.userGuid, permissions: grant.permissions }))
-		} catch (err) {
-			if (err instanceof BucketsTypes.BucketNotFoundError)
-				throw Api.gatewayException(NotFoundException, BucketsDto.ErrorCodes.BUCKET_NOT_FOUND)
-			if (err instanceof BucketsTypes.PermissionDeniedError)
-				throw Api.gatewayException(ForbiddenException, BucketsDto.ErrorCodes.PERMISSION_DENIED)
-			throw err
-		}
+		const bucket = await this.bucketsService.getForUser({ name: bucketName, userGuid: user.guid, role: user.role, permission: BucketPermission.manage })
+		const grants = await this.bucketsService.listGrants(bucket.guid)
+
+		return grants.map((grant) => ({ userGuid: grant.userGuid, permissions: grant.permissions }))
 	}
 
 	@Put(':bucketName/grants')
 	@Version('1')
 	@SecuredEp()
+	@Audited(AuditAction.bucketSetGrant)
 	@HttpCode(HttpStatus.NO_CONTENT)
 	@ApiNotFoundResponse({ type: BucketsDto.BucketNotFoundError })
 	@ApiForbiddenResponse({ type: BucketsDto.BucketForbiddenError })
@@ -110,21 +148,14 @@ export class BucketsControllerV1 {
 		@Body() body: BucketsDto.SetBucketGrantBody,
 		@AuthUser() user: AuthTypes.Identity,
 	): Promise<void> {
-		try {
-			const bucket = await this.bucketsService.getForUser({ name: bucketName, userGuid: user.guid, role: user.role, permission: BucketPermission.manage })
-			await this.bucketsService.setGrant({ bucketGuid: bucket.guid, userGuid: body.userGuid, permissions: body.permissions })
-		} catch (err) {
-			if (err instanceof BucketsTypes.BucketNotFoundError)
-				throw Api.gatewayException(NotFoundException, BucketsDto.ErrorCodes.BUCKET_NOT_FOUND)
-			if (err instanceof BucketsTypes.PermissionDeniedError)
-				throw Api.gatewayException(ForbiddenException, BucketsDto.ErrorCodes.PERMISSION_DENIED)
-			throw err
-		}
+		const bucket = await this.bucketsService.getForUser({ name: bucketName, userGuid: user.guid, role: user.role, permission: BucketPermission.manage })
+		await this.bucketsService.setGrant({ bucketGuid: bucket.guid, userGuid: body.userGuid, permissions: body.permissions })
 	}
 
 	@Delete(':bucketName/grants/:userGuid')
 	@Version('1')
 	@SecuredEp()
+	@Audited(AuditAction.bucketRemoveGrant)
 	@HttpCode(HttpStatus.NO_CONTENT)
 	@ApiNotFoundResponse({ type: BucketsDto.BucketNotFoundError })
 	@ApiForbiddenResponse({ type: BucketsDto.BucketForbiddenError })
@@ -133,15 +164,7 @@ export class BucketsControllerV1 {
 		@Param('userGuid') userGuid: string,
 		@AuthUser() user: AuthTypes.Identity,
 	): Promise<void> {
-		try {
-			const bucket = await this.bucketsService.getForUser({ name: bucketName, userGuid: user.guid, role: user.role, permission: BucketPermission.manage })
-			await this.bucketsService.removeGrant({ bucketGuid: bucket.guid, userGuid })
-		} catch (err) {
-			if (err instanceof BucketsTypes.BucketNotFoundError)
-				throw Api.gatewayException(NotFoundException, BucketsDto.ErrorCodes.BUCKET_NOT_FOUND)
-			if (err instanceof BucketsTypes.PermissionDeniedError)
-				throw Api.gatewayException(ForbiddenException, BucketsDto.ErrorCodes.PERMISSION_DENIED)
-			throw err
-		}
+		const bucket = await this.bucketsService.getForUser({ name: bucketName, userGuid: user.guid, role: user.role, permission: BucketPermission.manage })
+		await this.bucketsService.removeGrant({ bucketGuid: bucket.guid, userGuid })
 	}
 }

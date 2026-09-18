@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common'
-import { StorageClass } from '@storage/database'
+import { BucketAcl, StorageClass } from '@storage/database'
 import { Request } from 'express'
 import { Readable } from 'stream'
 
 import { ObjectsTypes } from '../objects/objects.types'
+import { PoliciesTypes } from '../policies/policies.types'
 import { S3ChunkedStream } from './s3.chunked.stream'
 import { S3Exception } from './s3.exception'
 import { S3SignatureService } from './s3.signature.service'
@@ -34,6 +35,7 @@ export class S3RequestService {
 		if (unimplemented) throw new S3Exception('NotImplemented', unimplemented)
 
 		const known = [
+			S3Types.SubResource.acl,
 			S3Types.SubResource.uploadId,
 			S3Types.SubResource.uploads,
 			S3Types.SubResource.versioning,
@@ -45,6 +47,16 @@ export class S3RequestService {
 		]
 
 		return known.find((subResource) => keys.includes(subResource)) ?? S3Types.SubResource.none
+	}
+
+	/** The sub-resource of an object-level request. `?acl` is a bucket-only concept here - the
+	 *  store keeps no per-object ACL - so it fails as `NotImplemented` instead of being ignored
+	 *  and handled as a plain object operation. */
+	objectSubResource(req: Request, key?: string): S3Types.SubResource {
+		const subResource = this.subResource(req)
+		if (subResource === S3Types.SubResource.acl) throw new S3Exception('NotImplemented', key)
+
+		return subResource
 	}
 
 	/** Bucket and object key taken from the (already path-style) request path. Keys may contain
@@ -225,6 +237,38 @@ export class S3RequestService {
 		}
 	}
 
+	/** The values a bucket policy's `Condition` block is evaluated against. Keys that the
+	 *  request does not carry are left undefined, which is what makes a positive operator fail
+	 *  and a negated one pass. */
+	policyContext(req: Request): PoliciesTypes.PolicyContext {
+		const now = new Date()
+
+		return {
+			[PoliciesTypes.ConditionKeys.sourceIp]: this.sourceIp(req),
+			[PoliciesTypes.ConditionKeys.secureTransport]: String(this.isSecure(req)),
+			[PoliciesTypes.ConditionKeys.referer]: this.header(req, 'referer'),
+			[PoliciesTypes.ConditionKeys.userAgent]: this.header(req, 'user-agent'),
+			[PoliciesTypes.ConditionKeys.currentTime]: now.toISOString(),
+			[PoliciesTypes.ConditionKeys.epochTime]: String(Math.floor(now.getTime() / 1000)),
+			[PoliciesTypes.ConditionKeys.prefix]: this.query(req, 'prefix'),
+			[PoliciesTypes.ConditionKeys.delimiter]: this.query(req, 'delimiter'),
+			[PoliciesTypes.ConditionKeys.maxKeys]: this.query(req, 'max-keys'),
+			[PoliciesTypes.ConditionKeys.acl]: this.header(req, 'x-amz-acl'),
+		}
+	}
+
+	/** `x-amz-acl` on a `PutBucketAcl` / `CreateBucket`, validated against the canned ACLs
+	 *  this deployment stores. */
+	cannedAcl(req: Request): BucketAcl | undefined {
+		const value = this.header(req, 'x-amz-acl')
+		if (!value) return undefined
+
+		const known = Object.values(BucketAcl).find((acl) => String(acl) === value)
+		if (!known) throw new S3Exception('InvalidArgument', 'x-amz-acl')
+
+		return known
+	}
+
 	query(req: Request, name: string): string | undefined {
 		const value = req.query[name]
 		// A repeated query parameter arrives as an array; S3 acts on the first occurrence.
@@ -249,6 +293,22 @@ export class S3RequestService {
 	/** S3 quotes ETags in headers and XML bodies; internally they are stored bare. */
 	formatEtag(etag: string): string {
 		return `"${etag}"`
+	}
+
+	/** Client address as a policy sees it: the first `X-Forwarded-For` hop when the app runs
+	 *  behind a proxy, otherwise the socket peer. */
+	private sourceIp(req: Request): string | undefined {
+		const forwarded = this.header(req, 'x-forwarded-for')
+		if (forwarded) return forwarded.split(',')[0].trim()
+
+		return req.socket.remoteAddress ?? undefined
+	}
+
+	private isSecure(req: Request): boolean {
+		const forwardedProto = this.header(req, 'x-forwarded-proto')
+		if (forwardedProto) return forwardedProto.split(',')[0].trim().toLowerCase() === 'https'
+
+		return req.protocol === 'https'
 	}
 
 	/** `aws-chunked` is transfer framing, not a content encoding of the stored object, so it

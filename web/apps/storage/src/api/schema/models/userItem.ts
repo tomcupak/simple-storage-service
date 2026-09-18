@@ -6,6 +6,7 @@
  * OpenAPI spec version: 1.0.0
  */
 import type { UserItemRole } from './userItemRole';
+import type { UserItemStatus } from './userItemStatus';
 
 export interface UserItem {
   guid: string;
@@ -13,6 +14,12 @@ export interface UserItem {
   /** @nullable */
   name?: string | null;
   role: UserItemRole;
+  status: UserItemStatus;
+  /**
+   * Storage limit in bytes; null means unlimited
+   * @nullable
+   */
+  quotaBytes: number | null;
   /** @nullable */
   lastLoginAt?: string | null;
   createdAt: string;

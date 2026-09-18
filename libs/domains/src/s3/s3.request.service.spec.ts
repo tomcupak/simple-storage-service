@@ -50,7 +50,12 @@ describe('S3RequestService', () => {
 
 		it('rejects a sub-resource this deployment does not implement', () => {
 			expect(() => service.subResource(makeRequest({ query: { tagging: '' } }))).toThrow(S3Exception)
-			expect(() => service.subResource(makeRequest({ query: { acl: '' } }))).toThrow(S3Exception)
+			expect(() => service.subResource(makeRequest({ query: { lifecycle: '' } }))).toThrow(S3Exception)
+		})
+
+		it('recognises ?acl, which buckets answer and objects do not', () => {
+			expect(service.subResource(makeRequest({ query: { acl: '' } }))).toBe(S3Types.SubResource.acl)
+			expect(() => service.objectSubResource(makeRequest({ query: { acl: '' } }), 'cat.jpg')).toThrow(S3Exception)
 		})
 	})
 

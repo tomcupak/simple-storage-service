@@ -30,31 +30,32 @@ export class S3ObjectControllerV1 {
 	@Put()
 	async put(@Req() req: Request, @Res() res: Response, @S3Identity() identity: S3Types.RequestIdentity): Promise<void> {
 		const { bucket: bucketName, key } = this.requestService.bucketAndKey(req)
-		// Reading the sub-resource first is what turns `?acl`, `?tagging` and friends into
+		// Reading the sub-resource first is what turns `?tagging` and friends into
 		// `NotImplemented` instead of silently writing an object.
-		this.requestService.subResource(req)
+		this.requestService.objectSubResource(req, key)
 		const uploadId = this.requestService.query(req, 'uploadId')
 		const partNumber = this.requestService.queryNumber(req, 'partNumber')
 		const copySource = this.requestService.copySource(req)
 
-		const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.putObject, key })
+		const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.putObject, key })
 
 		if (uploadId && partNumber !== undefined) {
 			if (copySource) {
-				const source = await this.authorizationService.resolveCopySource({ source: copySource, identity })
+				const source = await this.authorizationService.resolveCopySource({ req, source: copySource, identity })
 				const range = this.requestService.copySourceRange(req, source.size)
-				const part = await this.objectsService.uploadPartCopy({ bucketGuid: bucket.guid, uploadId, partNumber, source, range })
+				const part = await this.objectsService.uploadPartCopy({ bucket, uploadId, partNumber, source, range })
 
 				res.type('application/xml').send(this.responseService.copyPartResult(part))
 				return
 			}
 
 			const part = await this.objectsService.uploadPart({
-				bucketGuid: bucket.guid,
+				bucket,
 				uploadId,
 				partNumber,
 				stream: this.requestService.payloadStream(req, identity),
 				contentMd5: this.requestService.header(req, 'content-md5'),
+				declaredLength: this.requestService.payloadLength(req),
 			})
 
 			res.setHeader('ETag', this.requestService.formatEtag(part.etag))
@@ -63,12 +64,12 @@ export class S3ObjectControllerV1 {
 		}
 
 		if (copySource) {
-			const source = await this.authorizationService.resolveCopySource({ source: copySource, identity })
+			const source = await this.authorizationService.resolveCopySource({ req, source: copySource, identity })
 			const directive = (this.requestService.header(req, 'x-amz-metadata-directive') ?? '').toUpperCase()
 
 			const copied = await this.objectsService.copy({
 				source,
-				target: { guid: bucket.guid, versioning: bucket.versioning },
+				target: bucket,
 				key,
 				metadataDirective: directive === String(ObjectsTypes.MetadataDirective.replace)
 					? ObjectsTypes.MetadataDirective.replace
@@ -83,11 +84,12 @@ export class S3ObjectControllerV1 {
 		}
 
 		const written = await this.objectsService.put({
-			bucket: { guid: bucket.guid, versioning: bucket.versioning },
+			bucket,
 			key,
 			stream: this.requestService.payloadStream(req, identity),
 			contentMd5: this.requestService.header(req, 'content-md5'),
 			accessKeyId: identity.accessKeyId || undefined,
+			declaredLength: this.requestService.payloadLength(req),
 			...this.requestService.objectHeaders(req),
 		})
 
@@ -100,12 +102,12 @@ export class S3ObjectControllerV1 {
 	@Get()
 	async get(@Req() req: Request, @Res() res: Response, @S3Identity() identity: S3Types.RequestIdentity): Promise<void> {
 		const { bucket: bucketName, key } = this.requestService.bucketAndKey(req)
-		this.requestService.subResource(req)
+		this.requestService.objectSubResource(req, key)
 		const uploadId = this.requestService.query(req, 'uploadId')
 		const versionId = this.requestService.query(req, 'versionId')
 
 		if (uploadId) {
-			const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.listMultipartUploadParts, key })
+			const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.listMultipartUploadParts, key })
 			const maxParts = this.requestService.queryNumber(req, 'max-parts') ?? ObjectsTypes.MAX_KEYS_LIMIT
 			const partNumberMarker = this.requestService.queryNumber(req, 'part-number-marker')
 
@@ -117,7 +119,7 @@ export class S3ObjectControllerV1 {
 		}
 
 		const action = versionId ? S3Types.Action.getObjectVersion : S3Types.Action.getObject
-		const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action, key })
+		const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action, key })
 		const version = await this.objectsService.getVersion({ bucketGuid: bucket.guid, key, versionId })
 
 		this.responseService.assertReadable({ res, version })
@@ -141,11 +143,11 @@ export class S3ObjectControllerV1 {
 	@Head()
 	async head(@Req() req: Request, @Res() res: Response, @S3Identity() identity: S3Types.RequestIdentity): Promise<void> {
 		const { bucket: bucketName, key } = this.requestService.bucketAndKey(req)
-		this.requestService.subResource(req)
+		this.requestService.objectSubResource(req, key)
 		const versionId = this.requestService.query(req, 'versionId')
 
 		const action = versionId ? S3Types.Action.getObjectVersion : S3Types.Action.getObject
-		const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action, key })
+		const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action, key })
 		const version = await this.objectsService.getVersion({ bucketGuid: bucket.guid, key, versionId })
 
 		this.responseService.assertReadable({ res, version })
@@ -168,22 +170,22 @@ export class S3ObjectControllerV1 {
 	@Delete()
 	async delete(@Req() req: Request, @Res() res: Response, @S3Identity() identity: S3Types.RequestIdentity): Promise<void> {
 		const { bucket: bucketName, key } = this.requestService.bucketAndKey(req)
-		this.requestService.subResource(req)
+		this.requestService.objectSubResource(req, key)
 		const uploadId = this.requestService.query(req, 'uploadId')
 		const versionId = this.requestService.query(req, 'versionId')
 
 		if (uploadId) {
-			const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.abortMultipartUpload, key })
+			const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.abortMultipartUpload, key })
 			await this.objectsService.abortMultipartUpload({ bucketGuid: bucket.guid, uploadId })
 			res.status(204).end()
 			return
 		}
 
 		const action = versionId ? S3Types.Action.deleteObjectVersion : S3Types.Action.deleteObject
-		const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action, key })
+		const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action, key })
 
 		const result = await this.objectsService.delete({
-			bucket: { guid: bucket.guid, versioning: bucket.versioning },
+			bucket,
 			key,
 			versionId,
 			accessKeyId: identity.accessKeyId || undefined,
@@ -198,14 +200,14 @@ export class S3ObjectControllerV1 {
 	@Post()
 	async post(@Req() req: Request, @Res() res: Response, @S3Identity() identity: S3Types.RequestIdentity): Promise<void> {
 		const { bucket: bucketName, key } = this.requestService.bucketAndKey(req)
-		const subResource = this.requestService.subResource(req)
+		const subResource = this.requestService.objectSubResource(req, key)
 		const uploadId = this.requestService.query(req, 'uploadId')
 
-		const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.putObject, key })
+		const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.putObject, key })
 
 		if (subResource === S3Types.SubResource.uploads) {
 			const created = await this.objectsService.createMultipartUpload({
-				bucket: { guid: bucket.guid, versioning: bucket.versioning },
+				bucket,
 				key,
 				accessKeyId: identity.accessKeyId || undefined,
 				...this.requestService.objectHeaders(req),
@@ -220,7 +222,7 @@ export class S3ObjectControllerV1 {
 
 		const request = S3XmlService.parseCompleteMultipartUpload(await this.requestService.readBody(req))
 		const completed = await this.objectsService.completeMultipartUpload({
-			bucket: { guid: bucket.guid, versioning: bucket.versioning },
+			bucket,
 			uploadId,
 			parts: request.parts,
 		})

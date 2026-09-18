@@ -51,6 +51,8 @@ export class ConfigProvider {
 			region: process.env.S3_REGION || 'us-east-1',
 			/** Base domain enabling virtual-host style addressing (`<bucket>.<domain>`). */
 			endpointDomain: process.env.S3_ENDPOINT_DOMAIN || '',
+			/** Origin the S3 endpoint is reachable at from outside - the base of presigned URLs. */
+			publicUrl: process.env.S3_PUBLIC_URL || `http://localhost:${process.env.S3_PORT || 10411}`,
 			service: 's3',
 		},
 	} as const

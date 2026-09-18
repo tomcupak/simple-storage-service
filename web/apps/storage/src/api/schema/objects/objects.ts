@@ -6,10 +6,20 @@
  * OpenAPI spec version: 1.0.0
  */
 import type {
+  CopyObjectBody,
+  CopyObjectResponse,
+  CreateFolderBody,
+  DeleteObjectResponse,
   ListObjectsResponse,
   ObjectVersionItem,
+  ObjectsControllerV1DeleteV1Params,
+  ObjectsControllerV1DownloadV1Params,
   ObjectsControllerV1ListV1Params,
-  ObjectsControllerV1ListVersionsV1Params
+  ObjectsControllerV1ListVersionsV1Params,
+  ObjectsControllerV1UploadV1Params,
+  PresignObjectBody,
+  PresignObjectResponse,
+  UploadObjectResponse
 } from '.././models';
 
 import { customInstance } from '../../customInstance';
@@ -27,6 +37,29 @@ const objectsControllerV1ListV1 = (
     },
       );
     }
+  const objectsControllerV1UploadV1 = (
+    bucketName: string,
+    objectsControllerV1UploadV1Body: Blob,
+    params: ObjectsControllerV1UploadV1Params,
+ ) => {
+      return customInstance<UploadObjectResponse>(
+      {url: `/v1/buckets/${bucketName}/objects`, method: 'PUT',
+      headers: {'Content-Type': 'application/octet-stream', },
+      data: objectsControllerV1UploadV1Body,
+        params
+    },
+      );
+    }
+  const objectsControllerV1DeleteV1 = (
+    bucketName: string,
+    params?: ObjectsControllerV1DeleteV1Params,
+ ) => {
+      return customInstance<DeleteObjectResponse>(
+      {url: `/v1/buckets/${bucketName}/objects`, method: 'DELETE',
+        params
+    },
+      );
+    }
   const objectsControllerV1ListVersionsV1 = (
     bucketName: string,
     params: ObjectsControllerV1ListVersionsV1Params,
@@ -37,6 +70,55 @@ const objectsControllerV1ListV1 = (
     },
       );
     }
-  return {objectsControllerV1ListV1,objectsControllerV1ListVersionsV1}};
+  const objectsControllerV1DownloadV1 = (
+    bucketName: string,
+    params: ObjectsControllerV1DownloadV1Params,
+ ) => {
+      return customInstance<void>(
+      {url: `/v1/buckets/${bucketName}/objects/download`, method: 'GET',
+        params
+    },
+      );
+    }
+  const objectsControllerV1CreateFolderV1 = (
+    bucketName: string,
+    createFolderBody: CreateFolderBody,
+ ) => {
+      return customInstance<UploadObjectResponse>(
+      {url: `/v1/buckets/${bucketName}/objects/folder`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: createFolderBody
+    },
+      );
+    }
+  const objectsControllerV1CopyV1 = (
+    bucketName: string,
+    copyObjectBody: CopyObjectBody,
+ ) => {
+      return customInstance<CopyObjectResponse>(
+      {url: `/v1/buckets/${bucketName}/objects/copy`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: copyObjectBody
+    },
+      );
+    }
+  const objectsControllerV1PresignV1 = (
+    bucketName: string,
+    presignObjectBody: PresignObjectBody,
+ ) => {
+      return customInstance<PresignObjectResponse>(
+      {url: `/v1/buckets/${bucketName}/objects/presign`, method: 'POST',
+      headers: {'Content-Type': 'application/json', },
+      data: presignObjectBody
+    },
+      );
+    }
+  return {objectsControllerV1ListV1,objectsControllerV1UploadV1,objectsControllerV1DeleteV1,objectsControllerV1ListVersionsV1,objectsControllerV1DownloadV1,objectsControllerV1CreateFolderV1,objectsControllerV1CopyV1,objectsControllerV1PresignV1}};
 export type ObjectsControllerV1ListV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getObjects>['objectsControllerV1ListV1']>>>
+export type ObjectsControllerV1UploadV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getObjects>['objectsControllerV1UploadV1']>>>
+export type ObjectsControllerV1DeleteV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getObjects>['objectsControllerV1DeleteV1']>>>
 export type ObjectsControllerV1ListVersionsV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getObjects>['objectsControllerV1ListVersionsV1']>>>
+export type ObjectsControllerV1DownloadV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getObjects>['objectsControllerV1DownloadV1']>>>
+export type ObjectsControllerV1CreateFolderV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getObjects>['objectsControllerV1CreateFolderV1']>>>
+export type ObjectsControllerV1CopyV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getObjects>['objectsControllerV1CopyV1']>>>
+export type ObjectsControllerV1PresignV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getObjects>['objectsControllerV1PresignV1']>>>

@@ -15,5 +15,10 @@ export interface BucketItem {
   region: string;
   acl: BucketItemAcl;
   versioning: BucketItemVersioning;
+  /**
+   * Storage limit in bytes; null means unlimited
+   * @nullable
+   */
+  quotaBytes: number | null;
   createdAt: string;
 }

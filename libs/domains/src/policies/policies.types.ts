@@ -21,8 +21,30 @@ export namespace PoliciesTypes {
 		/** e.g. `arn:aws:s3:::my-bucket/*`. */
 		Resource: string | string[]
 		NotResource?: string | string[]
+		/** `{ IpAddress: { 'aws:SourceIp': ['10.0.0.0/8'] } }` - operator, key, expected values. */
 		Condition?: Record<string, Record<string, string | string[]>>
 	}
+
+	/** Condition keys resolved from the request. Anything a statement asks for that is not
+	 *  in here counts as missing, which fails a positive operator and passes a negated one. */
+	export const ConditionKeys = {
+		sourceIp: 'aws:SourceIp',
+		secureTransport: 'aws:SecureTransport',
+		/** Guid of the credential owner - this deployment has no separate user names. */
+		username: 'aws:username',
+		userId: 'aws:userid',
+		referer: 'aws:Referer',
+		userAgent: 'aws:UserAgent',
+		currentTime: 'aws:CurrentTime',
+		epochTime: 'aws:EpochTime',
+		prefix: 's3:prefix',
+		delimiter: 's3:delimiter',
+		maxKeys: 's3:max-keys',
+		acl: 's3:x-amz-acl',
+	} as const
+
+	/** Values a `Condition` block is evaluated against, keyed by `ConditionKeys`. */
+	export type PolicyContext = Record<string, string | string[] | undefined>
 
 	/** The request being authorised, in the terms a policy statement is written in. */
 	export interface EvaluationRequest {
@@ -33,7 +55,7 @@ export namespace PoliciesTypes {
 		principalUserGuid?: string
 		accessKeyId?: string
 		/** Values used by `Condition` operators (sourceIp, secureTransport, prefixes, ...). */
-		context?: Record<string, string | string[] | undefined>
+		context?: PolicyContext
 	}
 
 	export enum Decision {

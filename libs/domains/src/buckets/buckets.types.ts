@@ -15,6 +15,8 @@ export namespace BucketsTypes {
 		region: string
 		acl: BucketAcl
 		versioning: BucketVersioning
+		/** Maximum bytes the bucket may hold; null means unlimited. */
+		quotaBytes: number | null
 		/** `CORSConfiguration` set through `PutBucketCors`; null when the bucket has none. */
 		cors: S3Types.CorsConfiguration | null
 		createdAt: Date

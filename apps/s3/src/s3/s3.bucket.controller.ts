@@ -31,7 +31,7 @@ export class S3BucketControllerV1 {
 		private readonly responseService: S3ResponseService,
 	) {}
 
-	/** `CreateBucket`, `PutBucketVersioning`, `PutBucketPolicy`, `PutBucketCors`. */
+	/** `CreateBucket`, `PutBucketAcl`, `PutBucketVersioning`, `PutBucketPolicy`, `PutBucketCors`. */
 	@Put()
 	async put(@Req() req: Request, @Res() res: Response, @S3Identity() identity: S3Types.RequestIdentity): Promise<void> {
 		const subResource = this.requestService.subResource(req)
@@ -45,14 +45,28 @@ export class S3BucketControllerV1 {
 				throw new S3Exception(existing.ownerUserGuid === identity.userGuid ? 'BucketAlreadyOwnedByYou' : 'BucketAlreadyExists', bucketName)
 			}
 
-			await this.bucketsService.create({ name: bucketName, ownerUserGuid: identity.userGuid, region: config.s3.region })
+			const created = await this.bucketsService.create({ name: bucketName, ownerUserGuid: identity.userGuid, region: config.s3.region })
+
+			const acl = this.requestService.cannedAcl(req)
+			if (acl) await this.bucketsService.setAcl({ guid: created.guid, acl })
+
 			res.setHeader('Location', `/${bucketName}`)
 			res.status(200).end()
 			return
 		}
 
+		if (subResource === S3Types.SubResource.acl) {
+			const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.putBucketAcl })
+			// `x-amz-acl` wins over a body, as in S3; only the canned ACLs have a representation here.
+			const acl = this.requestService.cannedAcl(req) ?? S3XmlService.parseAccessControlPolicy(await this.requestService.readBody(req))
+
+			await this.bucketsService.setAcl({ guid: bucket.guid, acl })
+			res.status(200).end()
+			return
+		}
+
 		if (subResource === S3Types.SubResource.versioning) {
-			const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.putBucketVersioning })
+			const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.putBucketVersioning })
 			const status = S3XmlService.parseVersioningConfiguration(await this.requestService.readBody(req))
 
 			await this.bucketsService.setVersioning({
@@ -64,7 +78,7 @@ export class S3BucketControllerV1 {
 		}
 
 		if (subResource === S3Types.SubResource.policy) {
-			const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.putBucketPolicy })
+			const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.putBucketPolicy })
 			const body = await this.requestService.readBody(req)
 
 			let document: PoliciesTypes.PolicyDocument
@@ -80,7 +94,7 @@ export class S3BucketControllerV1 {
 		}
 
 		if (subResource === S3Types.SubResource.cors) {
-			const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.putBucketCors })
+			const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.putBucketCors })
 			const configuration = S3XmlService.parseCorsConfiguration(await this.requestService.readBody(req))
 
 			await this.bucketsService.setCors({ guid: bucket.guid, configuration })
@@ -101,19 +115,25 @@ export class S3BucketControllerV1 {
 		const delimiter = this.requestService.query(req, 'delimiter')
 
 		if (subResource === S3Types.SubResource.location) {
-			const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.getBucketLocation })
+			const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.getBucketLocation })
 			res.type('application/xml').send(this.responseService.bucketLocation(bucket.region))
 			return
 		}
 
+		if (subResource === S3Types.SubResource.acl) {
+			const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.getBucketAcl })
+			res.type('application/xml').send(S3XmlService.buildAccessControlPolicy({ acl: bucket.acl, ownerId: bucket.ownerUserGuid }))
+			return
+		}
+
 		if (subResource === S3Types.SubResource.versioning) {
-			const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.getBucketVersioning })
+			const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.getBucketVersioning })
 			res.type('application/xml').send(this.responseService.bucketVersioning(bucket.versioning))
 			return
 		}
 
 		if (subResource === S3Types.SubResource.policy) {
-			const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.getBucketPolicy })
+			const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.getBucketPolicy })
 			const document = await this.policiesService.get(bucket.guid)
 			if (!document) throw new S3Exception('NoSuchBucketPolicy', bucketName)
 
@@ -122,7 +142,7 @@ export class S3BucketControllerV1 {
 		}
 
 		if (subResource === S3Types.SubResource.cors) {
-			const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.getBucketCors })
+			const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.getBucketCors })
 			if (!bucket.cors) throw new S3Exception('NoSuchCORSConfiguration', bucketName)
 
 			res.type('application/xml').send(S3XmlService.buildCorsConfiguration(bucket.cors))
@@ -130,7 +150,7 @@ export class S3BucketControllerV1 {
 		}
 
 		if (subResource === S3Types.SubResource.versions) {
-			const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.listBucketVersions })
+			const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.listBucketVersions })
 			const maxKeys = this.requestService.queryNumber(req, 'max-keys') ?? ObjectsTypes.MAX_KEYS_LIMIT
 			const keyMarker = this.requestService.query(req, 'key-marker')
 			const versionIdMarker = this.requestService.query(req, 'version-id-marker')
@@ -146,7 +166,7 @@ export class S3BucketControllerV1 {
 		}
 
 		if (subResource === S3Types.SubResource.uploads) {
-			const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.listBucketMultipartUploads })
+			const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.listBucketMultipartUploads })
 			const maxUploads = this.requestService.queryNumber(req, 'max-uploads') ?? ObjectsTypes.MAX_KEYS_LIMIT
 			const keyMarker = this.requestService.query(req, 'key-marker')
 			const uploadIdMarker = this.requestService.query(req, 'upload-id-marker')
@@ -161,7 +181,7 @@ export class S3BucketControllerV1 {
 			return
 		}
 
-		const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.listBucket })
+		const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.listBucket })
 		const maxKeys = this.requestService.queryNumber(req, 'max-keys') ?? ObjectsTypes.MAX_KEYS_LIMIT
 		const isV2 = this.requestService.query(req, 'list-type') === '2'
 		const continuationToken = isV2 ? this.requestService.query(req, 'continuation-token') : undefined
@@ -181,7 +201,7 @@ export class S3BucketControllerV1 {
 	@Head()
 	async head(@Req() req: Request, @Res() res: Response, @S3Identity() identity: S3Types.RequestIdentity): Promise<void> {
 		const { bucket: bucketName } = this.requestService.bucketAndKey(req)
-		const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.listBucket })
+		const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.listBucket })
 
 		res.setHeader('x-amz-bucket-region', bucket.region)
 		res.status(200).end()
@@ -194,14 +214,14 @@ export class S3BucketControllerV1 {
 		const { bucket: bucketName } = this.requestService.bucketAndKey(req)
 
 		if (subResource === S3Types.SubResource.policy) {
-			const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.deleteBucketPolicy })
+			const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.deleteBucketPolicy })
 			await this.policiesService.delete(bucket.guid)
 			res.status(204).end()
 			return
 		}
 
 		if (subResource === S3Types.SubResource.cors) {
-			const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.putBucketCors })
+			const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.putBucketCors })
 			await this.bucketsService.deleteCors(bucket.guid)
 			res.status(204).end()
 			return
@@ -209,7 +229,7 @@ export class S3BucketControllerV1 {
 
 		if (subResource !== S3Types.SubResource.none) throw new S3Exception('NotImplemented', bucketName)
 
-		const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.deleteBucket })
+		const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.deleteBucket })
 		await this.bucketsService.delete(bucket.guid)
 		res.status(204).end()
 	}
@@ -222,11 +242,11 @@ export class S3BucketControllerV1 {
 
 		if (subResource !== S3Types.SubResource.delete) throw new S3Exception('NotImplemented', bucketName)
 
-		const bucket = await this.authorizationService.resolveBucket({ name: bucketName, identity, action: S3Types.Action.deleteObject })
+		const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.deleteObject })
 		const request = S3XmlService.parseDelete(await this.requestService.readBody(req))
 
 		const result = await this.objectsService.deleteMany({
-			bucket: { guid: bucket.guid, versioning: bucket.versioning },
+			bucket,
 			objects: request.objects,
 			accessKeyId: identity.accessKeyId || undefined,
 		})

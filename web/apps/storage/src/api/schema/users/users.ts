@@ -8,7 +8,13 @@
 import type {
   CreateUserBody,
   SetPasswordBody,
-  UserItem
+  SetQuotaBody,
+  SetUserStatusBody,
+  UpdateUserBody,
+  UsageItem,
+  UserItem,
+  UserPage,
+  UsersControllerV1ListV1Params
 } from '.././models';
 
 import { customInstance } from '../../customInstance';
@@ -17,10 +23,11 @@ import { customInstance } from '../../customInstance';
 
   export const getUsers = () => {
 const usersControllerV1ListV1 = (
-    
+    params?: UsersControllerV1ListV1Params,
  ) => {
-      return customInstance<UserItem[]>(
-      {url: `/v1/users`, method: 'GET'
+      return customInstance<UserPage>(
+      {url: `/v1/users`, method: 'GET',
+        params
     },
       );
     }
@@ -31,6 +38,55 @@ const usersControllerV1ListV1 = (
       {url: `/v1/users`, method: 'POST',
       headers: {'Content-Type': 'application/json', },
       data: createUserBody
+    },
+      );
+    }
+  const usersControllerV1UpdateV1 = (
+    userGuid: string,
+    updateUserBody: UpdateUserBody,
+ ) => {
+      return customInstance<UserItem>(
+      {url: `/v1/users/${userGuid}`, method: 'PATCH',
+      headers: {'Content-Type': 'application/json', },
+      data: updateUserBody
+    },
+      );
+    }
+  const usersControllerV1DeleteV1 = (
+    userGuid: string,
+ ) => {
+      return customInstance<unknown>(
+      {url: `/v1/users/${userGuid}`, method: 'DELETE'
+    },
+      );
+    }
+  const usersControllerV1SetStatusV1 = (
+    userGuid: string,
+    setUserStatusBody: SetUserStatusBody,
+ ) => {
+      return customInstance<unknown>(
+      {url: `/v1/users/${userGuid}/status`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: setUserStatusBody
+    },
+      );
+    }
+  const usersControllerV1SetQuotaV1 = (
+    userGuid: string,
+    setQuotaBody: SetQuotaBody,
+ ) => {
+      return customInstance<unknown>(
+      {url: `/v1/users/${userGuid}/quota`, method: 'PUT',
+      headers: {'Content-Type': 'application/json', },
+      data: setQuotaBody
+    },
+      );
+    }
+  const usersControllerV1UsageV1 = (
+    userGuid: string,
+ ) => {
+      return customInstance<UsageItem>(
+      {url: `/v1/users/${userGuid}/usage`, method: 'GET'
     },
       );
     }
@@ -45,16 +101,12 @@ const usersControllerV1ListV1 = (
     },
       );
     }
-  const usersControllerV1DeleteV1 = (
-    userGuid: string,
- ) => {
-      return customInstance<unknown>(
-      {url: `/v1/users/${userGuid}`, method: 'DELETE'
-    },
-      );
-    }
-  return {usersControllerV1ListV1,usersControllerV1CreateV1,usersControllerV1SetPasswordV1,usersControllerV1DeleteV1}};
+  return {usersControllerV1ListV1,usersControllerV1CreateV1,usersControllerV1UpdateV1,usersControllerV1DeleteV1,usersControllerV1SetStatusV1,usersControllerV1SetQuotaV1,usersControllerV1UsageV1,usersControllerV1SetPasswordV1}};
 export type UsersControllerV1ListV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getUsers>['usersControllerV1ListV1']>>>
 export type UsersControllerV1CreateV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getUsers>['usersControllerV1CreateV1']>>>
-export type UsersControllerV1SetPasswordV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getUsers>['usersControllerV1SetPasswordV1']>>>
+export type UsersControllerV1UpdateV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getUsers>['usersControllerV1UpdateV1']>>>
 export type UsersControllerV1DeleteV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getUsers>['usersControllerV1DeleteV1']>>>
+export type UsersControllerV1SetStatusV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getUsers>['usersControllerV1SetStatusV1']>>>
+export type UsersControllerV1SetQuotaV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getUsers>['usersControllerV1SetQuotaV1']>>>
+export type UsersControllerV1UsageV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getUsers>['usersControllerV1UsageV1']>>>
+export type UsersControllerV1SetPasswordV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getUsers>['usersControllerV1SetPasswordV1']>>>

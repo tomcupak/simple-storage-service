@@ -8,7 +8,7 @@ export function AccessKeysPage() {
 	const [created, setCreated] = useState<CreatedAccessKey | null>(null)
 
 	const refresh = useCallback(async () => {
-		setKeys(await api.listAccessKeys())
+		setKeys((await api.listAccessKeys()).data)
 	}, [])
 
 	useEffect(() => { void refresh() }, [refresh])

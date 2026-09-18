@@ -26,4 +26,6 @@ export namespace AccessKeysTypes {
 
 	export class AccessKeyNotFoundError extends Error { public code = 'access_key_not_found' }
 	export class AccessKeyInactiveError extends Error { public code = 'access_key_inactive' }
+	/** The user has no active key to sign a presigned URL with; they have to create one first. */
+	export class NoUsableAccessKeyError extends Error { public code = 'no_usable_access_key' }
 }

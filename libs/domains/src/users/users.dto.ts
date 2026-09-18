@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger'
-import { UserRole } from '@storage/database'
+import { UserRole, UserStatus } from '@storage/database'
 import { Api } from '@storage/shared'
 import { IsEmail, IsEnum, IsOptional, IsString, MinLength } from 'class-validator'
 
@@ -22,6 +22,12 @@ export namespace UsersDto {
 
 		@ApiProperty({ enum: UserRole })
 		declare role: UserRole
+
+		@ApiProperty({ enum: UserStatus })
+		declare status: UserStatus
+
+		@ApiProperty({ type: 'integer', nullable: true, description: 'Storage limit in bytes; null means unlimited' })
+		declare quotaBytes: number | null
 
 		@ApiProperty({ type: 'string', format: 'date-time', nullable: true, required: false })
 		declare lastLoginAt: Date | null
@@ -55,6 +61,29 @@ export namespace UsersDto {
 		@IsString()
 		@MinLength(8)
 		declare password: string
+	}
+
+	export class UpdateUserBody {
+		@ApiProperty({ type: 'string', nullable: true, required: false })
+		@IsOptional()
+		@IsString()
+		declare name?: string | null
+
+		@ApiProperty({ enum: UserRole, required: false })
+		@IsOptional()
+		@IsEnum(UserRole)
+		declare role?: UserRole
+	}
+
+	export class SetUserStatusBody {
+		@ApiProperty({ enum: UserStatus })
+		@IsEnum(UserStatus)
+		declare status: UserStatus
+	}
+
+	export class UserPage extends Api.PaginatedDataDto<UserItem> {
+		@ApiProperty({ type: UserItem, isArray: true })
+		declare data: UserItem[]
 	}
 
 	export class UserNotFoundError extends Api.createErrorDto([ErrorCodes.USER_NOT_FOUND]) {}

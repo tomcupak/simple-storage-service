@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common'
-import { coreSchema, DbProvider } from '@storage/database'
+import { coreSchema, DbProvider, UserStatus } from '@storage/database'
 import * as crypto from 'crypto'
 import { and, eq, isNull } from 'drizzle-orm'
 import * as jwt from 'jsonwebtoken'
@@ -27,6 +27,8 @@ export class AuthService {
 		if (!found || !this.verifyPassword(password, found.passwordHash)) {
 			throw new AuthTypes.InvalidCredentialsError()
 		}
+		// A deactivated account keeps its buckets and keys but must not be able to sign in.
+		if (found.status === UserStatus.disabled) throw new AuthTypes.UserDisabledError()
 
 		await this.db.core
 			.update(coreSchema.user)
@@ -52,7 +54,7 @@ export class AuthService {
 			.where(and(eq(coreSchema.user.guid, session.userGuid), isNull(coreSchema.user.deletedAt)))
 			.limit(1)
 
-		if (!found) throw new AuthTypes.UserDisabledError()
+		if (!found || found.status === UserStatus.disabled) throw new AuthTypes.UserDisabledError()
 
 		// Refresh tokens rotate: the presented one is revoked as soon as it is exchanged,
 		// so a leaked token stops working after its first use.
