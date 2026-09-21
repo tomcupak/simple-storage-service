@@ -13,12 +13,12 @@ services:
       - "10400:5432"
     restart: on-failure
 
-  redis:
-    image: redis:7.2-alpine
-    container_name: storage-redis
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: storage-valkey
     ports:
       - "10401:6379"
-    command: [ "redis-server", "--appendonly", "yes" ]
+    command: [ "valkey-server", "--appendonly", "yes" ]
     restart: on-failure
 
 volumes:

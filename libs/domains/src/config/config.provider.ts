@@ -13,11 +13,25 @@ export class ConfigProvider {
 		dbMigrationsPath: process.env.MIGRATIONS_CORE_PATH || '../../../libs/database/src/core/migrations',
 	} as const
 
-	static redis = {
-		redis: {
-			host: process.env.REDIS_HOST || 'localhost',
-			port: Number(process.env.REDIS_PORT || 10401),
-			password: process.env.REDIS_PASSWORD,
+	/** Valkey, spoken to with the `redis` client - the protocol is the same. */
+	static valkey = {
+		valkey: {
+			host: process.env.VALKEY_HOST || 'localhost',
+			port: Number(process.env.VALKEY_PORT || 10401),
+			password: process.env.VALKEY_PASSWORD,
+		},
+	} as const
+
+	/** Request rate limiting, backed by Valkey so every instance shares one counter.
+	 *  Without a reachable Valkey the limiter is a no-op rather than a closed door - an
+	 *  outage of the counter store must not take the storage endpoints down with it. */
+	static rateLimit = {
+		rateLimit: {
+			enabled: (process.env.RATE_LIMIT_ENABLED ?? 'true') !== 'false',
+			/** Length of the fixed window the counter is kept for, in seconds. */
+			windowSeconds: Number(process.env.RATE_LIMIT_WINDOW_SECONDS || 60),
+			/** Requests one caller may make per window. */
+			max: Number(process.env.RATE_LIMIT_MAX || 600),
 		},
 	} as const
 
@@ -25,6 +39,16 @@ export class ConfigProvider {
 	static storage = {
 		storage: {
 			dataPath: process.env.STORAGE_DATA_PATH || './data/objects',
+			/** SSE-S3. The master key wraps the per-object data keys, so it must outlive every
+			 *  object written under it - losing it makes them unreadable. It defaults to the
+			 *  secret-key password so a single-secret deployment still works, but a deployment
+			 *  that means it should set its own and never rotate it without re-wrapping. */
+			encryption: {
+				enabled: (process.env.STORAGE_ENCRYPTION ?? 'true') !== 'false',
+				masterKey: process.env.STORAGE_ENCRYPTION_KEY
+					|| process.env.CRYPTOGRAPHIC_PASSWORD
+					|| 'dev-secret-password-32-chars-min',
+			},
 		},
 	} as const
 
@@ -43,6 +67,17 @@ export class ConfigProvider {
 	static cryptographic = {
 		cryptographic: {
 			password: process.env.CRYPTOGRAPHIC_PASSWORD || 'dev-secret-password-32-chars-min',
+		},
+	} as const
+
+	/** Reclaims blobs the write paths deliberately left behind, and aborts multipart uploads
+	 *  a client never finished. Runs in one app only - see `apps/api`. */
+	static gc = {
+		gc: {
+			enabled: (process.env.GC_ENABLED ?? 'true') !== 'false',
+			cron: process.env.GC_CRON || '17 3 * * *',
+			multipartMaxAgeHours: Number(process.env.GC_MULTIPART_MAX_AGE_HOURS || 7 * 24),
+			blobMinAgeHours: Number(process.env.GC_BLOB_MIN_AGE_HOURS || 24),
 		},
 	} as const
 

@@ -88,6 +88,7 @@ export class UsersControllerV1 {
 	@Audited(AuditAction.userSetPassword)
 	@HttpCode(HttpStatus.NO_CONTENT)
 	@ApiNotFoundResponse({ type: UsersDto.UserNotFoundError })
+	@ApiBadRequestResponse({ type: UsersDto.SetPasswordBadRequestError })
 	async setPassword(
 		@Param('userGuid') userGuid: string,
 		@Body() body: UsersDto.SetPasswordBody,
@@ -97,7 +98,13 @@ export class UsersControllerV1 {
 		if (user.role !== UserRole.admin && user.guid !== userGuid)
 			throw Api.gatewayException(NotFoundException, UsersDto.ErrorCodes.USER_NOT_FOUND)
 
-		await this.usersService.setPassword(userGuid, body.password)
+		// Whether the current password is demanded is the service's call, from who the actor is.
+		await this.usersService.setPassword({
+			guid: userGuid,
+			password: body.password,
+			currentPassword: body.currentPassword,
+			actorGuid: user.guid,
+		})
 	}
 
 	@Delete(':userGuid')

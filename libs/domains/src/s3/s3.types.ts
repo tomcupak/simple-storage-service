@@ -33,6 +33,7 @@ export namespace S3Types {
 		PreconditionFailed: { status: 412, message: 'At least one of the preconditions you specified did not hold' },
 		RequestTimeTooSkewed: { status: 403, message: 'The difference between the request time and the current time is too large' },
 		SignatureDoesNotMatch: { status: 403, message: 'The request signature we calculated does not match the signature you provided' },
+		SlowDown: { status: 503, message: 'Please reduce your request rate' },
 		XAmzContentSHA256Mismatch: { status: 400, message: 'The provided x-amz-content-sha256 header does not match what was computed' },
 	} as const
 

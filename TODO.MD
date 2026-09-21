@@ -1,8 +1,10 @@
 # TODO
 
-Stav po iteraci 2: vývojové prostředí běží (podman, migrace, bootstrap admin, Orval klient, CI),
-S3 API umí kompletní objektové operace včetně multipartu, verzování, presigned URL a CORS.
-Níže je to, co zbývá doimplementovat k funkčnímu API a UI.
+Stav po iteraci 3: S3 i management API jsou funkčně hotové, doplněné o provozní vrstvu —
+health/readiness, strukturované logování, rate limiting nad Valkey, garbage collector osiřelých
+blobů, šifrování objektů at rest (SSE-S3) a nasazovací artefakty (Dockerfile, systemd, release
+pipeline). Testy pokrývají SigV4 proti AWS, blob store, DB integraci i E2E proti `apps/s3`
+skutečným AWS SDK klientem. Níže je to, co zbývá.
 
 Legenda: **[S3]** = S3-kompatibilní API (`apps/s3`), **[API]** = management API (`apps/api`),
 **[UI]** = webové rozhraní (`web/apps/storage`), **[DOM]** = doménová logika (`libs/domains`).
@@ -11,9 +13,11 @@ Legenda: **[S3]** = S3-kompatibilní API (`apps/s3`), **[API]** = management API
 
 ## 1. Rozjetí vývojového prostředí
 
-- [x] Podman servisky (`storage-postgres` na 10400, `storage-redis` na 10401). WSL integrace
+- [x] Podman servisky (`storage-postgres` na 10400, `storage-valkey` na 10401). WSL integrace
       Docker Desktopu není potřeba — kontejnery běží přímo pod podmanem, `podman compose` ale
-      bez ní nefunguje, takže se spouští `podman run` (viz README).
+      bez ní nefunguje, takže se spouští `podman run` (viz README). Publikování portů přes `-p`
+      navíc potřebuje `net.ipv4.conf.lo.route_localnet=1`; bez něj se použije `--network host`
+      s posunutým portem (`PGPORT`, `--port`).
 - [x] `.env` doplněn — `JWT_SECRET` a `CRYPTOGRAPHIC_PASSWORD` vygenerované náhodně.
 - [x] První start `npm run dev:api` — migrace proběhly, bootstrap admin založen
       (`admin@storage.local` / `admin12345`).
@@ -104,8 +108,10 @@ bucketu, statistiky, kvóty, správa uživatelů, audit log, paginace.
 - [x] Audit log — tabulka `audit_log`, dekorátor `@Audited(...)` + `AuditInterceptor`,
       výpis `GET /v1/audit` (stránkovaný, s filtry) a `GET /v1/audit/actions`.
 - [x] Paginace u výpisů uživatelů a klíčů (`Api.PagingQuery`).
-- [ ] Endpoint pro rozpad `userGuid` → e-mail dostupný i správci bucketu (dnes umí seznam
-      uživatelů jen admin, takže neadmin vidí přístupy k vlastnímu bucketu jen read-only).
+- [x] Endpoint pro rozpad `userGuid` → e-mail dostupný i správci bucketu:
+      `GET /v1/buckets/:name/users` vyžaduje `manage` na daném bucketu a vrací jen
+      `{ guid, email, name }` — bez rolí, kvót a časů přihlášení, které zůstávají adminům.
+      UI díky tomu umí přístupy editovat i neadminovi.
 
 Vedlejší úprava: `ApiExceptionFilter` (globální, po vzoru `S3ExceptionFilter`) mapuje doménové chyby
 na HTTP status + `{ code }`, takže handlery už nemusí obalovat volání služeb do try/catch.
@@ -144,22 +150,69 @@ v záložkách, i18n cs/en, hlášení chyb podle `code`.
 
 ## 6. Kvalita a provoz
 
-- [ ] Testy: `S3SignatureService` proti oficiálním AWS test vektorům (dnes je pokrytý jen presign
-      round-trip podepsat → ověřit), `StorageService` (write/read/range/concat),
-      `BucketsService` a `ObjectsService` (DB integrační testy proti `core_test`).
-      Hotovo: `S3ChunkedStream`, `S3RequestService`, `PoliciesService` (matice + podmínky),
-      `S3AuthorizationService`, `UsageService` (kvóty), guardy `ObjectsService` (klíče, prefixy,
-      kopie), `drizzleErrorCode`/`isUniqueViolation` a převod query parametrů v `ListObjectsQuery`.
-- [ ] E2E test proti `apps/s3` skutečným AWS SDK klientem (`@aws-sdk/client-s3`) — hlavní scénáře.
-- [ ] Helpery pro migrace a truncate v `@storage/database` (`libs/database/src/testing`) — zatím neexistují.
-- [ ] Health/readiness endpoint pro `apps/s3` (dnes má jen `apps/api`).
-- [ ] Strukturované logování requestů (metoda, bucket, klíč, access key, doba trvání).
-- [ ] Rate limiting a limity velikosti requestů (redis je připravený v docker-compose, ale nepoužitý).
-- [ ] Garbage collector osiřelých blobů (verze smazané z DB, nedokončené multipart uploady starší N dní).
-- [ ] Deployment: Dockerfile / systemd unit, build pipeline, konfigurace přes env.
-- [ ] Šifrování objektů at rest (SSE-S3) a `x-amz-server-side-encryption` hlavičky.
-- [ ] security audit (hlavně EPs)
+- [x] Testy: `S3SignatureService` proti AWS (`s3.signature.vectors.spec.ts` — kanonický request
+      z publikovaného `aws-sig-v4-test-suite` vektoru, podpisy z `@smithy/signature-v4`),
+      `StorageService` (write/read/range/concat, šifrování, `maxBytes`, `listBlobs`),
+      `BucketsService`, `ObjectsService` a `UsersService` (DB integrační testy proti `core_test`).
+      Dohromady 285 testů.
+- [x] E2E test proti `apps/s3` skutečným AWS SDK klientem (`@aws-sdk/client-s3`) — buckety,
+      objekty, rozsahy, verzování, multipart, presigned URL, autorizace, health.
+      **Našel reálnou chybu:** kanonický query string se řadil `localeCompare` místo po bajtech,
+      takže každý presigned odkaz z AWS SDK (`x-id`, `x-amz-checksum-mode` vedle `X-Amz-*`)
+      končil na 403. Opraveno, regresní test je i v unit suite.
+- [x] Helpery pro migrace a truncate v `@storage/database/testing` — `TestDatabase` (migrace
+      jednou na worker, `truncate`) a `TestSeed` (jen FK prerekvizity, vrací vložený řádek).
+- [x] Health/readiness endpoint pro `apps/s3` — `GET /_health` a `GET /_ready` (databáze +
+      zapisovatelnost datového adresáře, 503 když něco chybí). Podtržítko není platný název
+      bucketu, takže cesty nekolidují s `/:bucket`.
+- [x] Strukturované logování requestů — `RequestLogService` v `@storage/shared`, jeden JSON
+      řádek na dokončený request (metoda, cesta, status, bucket, klíč, access key, uživatel,
+      IP, bajty, doba trvání, chybový kód). Zapisuje se na `res.on('finish')`, protože payloady
+      se streamují a handler skončí dřív než poslední bajt.
+- [x] Rate limiting a limity velikosti requestů — `RateLimitService` počítá ve Valkey (fixní
+      okno, `INCR` + `EXPIRE`), S3 vrací `SlowDown`, management `{ code: 'rate_limited' }`.
+      Nedostupný Valkey requesty propouští. `S3_MAX_SINGLE_UPLOAD_BYTES` / `API_MAX_UPLOAD_BYTES`
+      se nově opravdu vynucují — i za běhu streamu, ne jen proti ohlášené `Content-Length`.
+- [x] Garbage collector osiřelých blobů — `libs/domains/src/gc`, cron jen v `apps/api`. Maže
+      bloby, na které neukazuje žádný řádek (mladší než `GC_BLOB_MIN_AGE_HOURS` vynechává, aby
+      nesmazal probíhající upload), a ruší multipart uploady starší `GC_MULTIPART_MAX_AGE_HOURS`.
+- [x] Deployment: `docker/Dockerfile` (cíle `api` / `s3` / `web`), `docker-compose.prod.yml`,
+      systemd unity v `deploy/`, `.github/workflows/release.yml` staví obrazy na tagu `v*`.
+      Konfigurace kompletně přes env — viz `.env.sample`.
+      **Vedlejší nález:** `npm run build` byl `nest build`, což v tomhle monorepu bez výchozího
+      projektu nevyrobí nic — CI build krok procházel naprázdno. Teď staví obě aplikace.
+- [x] Šifrování objektů at rest (SSE-S3) a `x-amz-server-side-encryption` hlavičky — vlastní
+      klíč na objekt, zabalený `STORAGE_ENCRYPTION_KEY`, zaznamenaný per verzi (`encryption`,
+      `encryption_key`), takže zapnutí/vypnutí nerozbije už uložená data. Payload šifruje
+      AES-256-CTR, aby `Range` zůstal úměrný rozsahu; klíče se balí GCM.
+- [x] Security audit endpointů. Všechny mají explicitní `@PublicEp()` / `@SecuredEp()` a objektové
+      i bucketové operace resolvují bucket s konkrétním oprávněním. Dva reálné nálezy, oba opravené:
+      - změna vlastního hesla nevyžadovala současné heslo (ukradený access token stačil na převzetí
+        účtu) — `PUT /v1/users/:guid/password` ho teď u self-service změny vyžaduje,
+      - změna hesla nerušila existující sessions, takže útočníkův refresh token přežil reset —
+        teď se všechny sessions účtu revokují.
+
+      Zbytek prověřen bez nálezu: vlastnictví access keys, `getForUser` hlásí nepřístupný bucket
+      jako 404 (nejdou enumerovat), hesla scrypt + `timingSafeEqual`, rotace refresh tokenů,
+      kontrola `type: 'access'` v JWT, redakce citlivých polí v audit logu, zákaz degradace
+      posledního admina.
 
 ## 7. Poznámky a úpravy
-- vyměňme Redis za valkey (redis knihovna je kompatibilní)
-- angličtina je default jazyk v ui
+
+- [x] Redis vyměněn za Valkey (`valkey/valkey:8-alpine`, klient `redis` je protokolově
+      kompatibilní). Proměnné se jmenují `VALKEY_HOST` / `VALKEY_PORT` / `VALKEY_PASSWORD`.
+- [x] Angličtina je default jazyk v UI. Jazyk prohlížeče se už nedetekuje — UI mluví anglicky,
+      dokud si uživatel nevybere jinak, a do `localStorage` se ukládá jen ta explicitní volba
+      (default zůstane nezapsaný, aby šel později změnit).
+
+---
+
+## 8. Co zbývá
+
+- [ ] Rotace `STORAGE_ENCRYPTION_KEY` — dnes by znamenala, že se starý klíč nesmí zahodit.
+      Přebalení uložených klíčů (re-wrap) není implementované.
+- [ ] Per-bucket konfigurace šifrování (`PutBucketEncryption`) — dnes je šifrování volba
+      nasazení, ne bucketu, a `?encryption` vrací `NotImplemented`.
+- [ ] Swagger je na `/swagger` veřejně; v produkci by se hodil přepínač na vypnutí.
+- [ ] Rate limiting nepočítá requesty odmítnuté `AuthGuard`em (špatný token), protože guard běží
+      první. Pro brute-force hesel to nevadí (login je `@PublicEp()`), pro hádání tokenů ano.

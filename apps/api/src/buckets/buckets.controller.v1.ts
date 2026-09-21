@@ -5,6 +5,7 @@ import { Audited } from '@storage/domains/audit'
 import { AuthTypes, AuthUser, SecuredEp } from '@storage/domains/auth'
 import { BucketsDto, BucketsService } from '@storage/domains/buckets'
 import { UsageDto, UsageService } from '@storage/domains/usage'
+import { UsersService } from '@storage/domains/users'
 import { Api } from '@storage/shared'
 
 @ApiTags('buckets')
@@ -14,6 +15,7 @@ export class BucketsControllerV1 {
 	constructor(
 		private readonly bucketsService: BucketsService,
 		private readonly usageService: UsageService,
+		private readonly usersService: UsersService,
 	) {}
 
 	@Get()
@@ -134,6 +136,21 @@ export class BucketsControllerV1 {
 		const grants = await this.bucketsService.listGrants(bucket.guid)
 
 		return grants.map((grant) => ({ userGuid: grant.userGuid, permissions: grant.permissions }))
+	}
+
+	/** Resolves the guids on this bucket's grants, and lists who else could be granted access.
+	 *  `GET /v1/users` is admin-only, so without this a non-admin bucket manager could read
+	 *  their own grants but not tell whose they are. */
+	@Get(':bucketName/users')
+	@Version('1')
+	@SecuredEp()
+	@ApiOkResponse({ type: BucketsDto.BucketUserItem, isArray: true })
+	@ApiNotFoundResponse({ type: BucketsDto.BucketNotFoundError })
+	@ApiForbiddenResponse({ type: BucketsDto.BucketForbiddenError })
+	async listUsers(@Param('bucketName') bucketName: string, @AuthUser() user: AuthTypes.Identity): Promise<BucketsDto.BucketUserItem[]> {
+		await this.bucketsService.getForUser({ name: bucketName, userGuid: user.guid, role: user.role, permission: BucketPermission.manage })
+
+		return this.usersService.listDirectory()
 	}
 
 	@Put(':bucketName/grants')

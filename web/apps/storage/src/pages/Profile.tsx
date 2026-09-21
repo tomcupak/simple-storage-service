@@ -16,6 +16,7 @@ export function ProfilePage() {
 	const [usage, setUsage] = useState<UsageItem | null>(null)
 	const [usageError, setUsageError] = useState<unknown>(null)
 
+	const [currentPassword, setCurrentPassword] = useState('')
 	const [password, setPassword] = useState('')
 	const [repeated, setRepeated] = useState('')
 	const [passwordError, setPasswordError] = useState<unknown>(null)
@@ -48,7 +49,10 @@ export function ProfilePage() {
 
 		setBusy(true)
 		try {
-			await api.setUserPassword(user.guid, password)
+			// The current password is what the API demands of a self-service change, and the
+			// change signs every other session out - including this browser's refresh token.
+			await api.setUserPassword(user.guid, { currentPassword, password })
+			setCurrentPassword('')
 			setPassword('')
 			setRepeated('')
 			setChanged(true)
@@ -89,6 +93,16 @@ export function ProfilePage() {
 				<div className="card section">
 					<h2>{t('profile.changePassword')}</h2>
 					<form onSubmit={(event) => void submit(event)}>
+						<div className="field">
+							<label htmlFor="profile-current-password">{t('profile.currentPassword')}</label>
+							<input
+								id="profile-current-password"
+								type="password"
+								autoComplete="current-password"
+								value={currentPassword}
+								onChange={(event) => setCurrentPassword(event.target.value)}
+							/>
+						</div>
 						<div className="field">
 							<label htmlFor="profile-password">{t('profile.newPassword')}</label>
 							<input

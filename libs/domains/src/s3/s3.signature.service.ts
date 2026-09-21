@@ -148,7 +148,7 @@ export class S3SignatureService {
 
 		const canonicalQuery = Object.entries(parameters)
 			.map(([name, value]) => [this.uriEncode(name), this.uriEncode(value)] as const)
-			.sort((a, b) => (a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0])))
+			.sort((a, b) => this.compareEncoded(a, b))
 			.map(([name, value]) => `${name}=${value}`)
 			.join('&')
 
@@ -211,7 +211,7 @@ export class S3SignatureService {
 				return [this.uriEncode(decodeURIComponent(key)), this.uriEncode(decodeURIComponent(rest.join('=')))] as const
 			})
 			.filter(([key]) => !excludeQueryKeys?.includes(key))
-			.sort((a, b) => (a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0])))
+			.sort((a, b) => this.compareEncoded(a, b))
 			.map(([key, value]) => `${key}=${value}`)
 			.join('&')
 
@@ -281,6 +281,20 @@ export class S3SignatureService {
 
 		if (Number.isNaN(timestamp)) throw new S3Types.MalformedAuthorizationError()
 		return timestamp
+	}
+
+	/** Orders two encoded query parameters the way AWS canonicalisation requires: by the bytes
+	 *  of the name, and by the bytes of the value when the names are equal.
+	 *
+	 *  Byte order, not locale order. `localeCompare` treats case as a secondary difference, so
+	 *  it interleaves `x-id` and `x-amz-checksum-mode` among the `X-Amz-*` parameters the AWS
+	 *  SDKs put on a presigned URL - and a canonical query in the wrong order is a signature
+	 *  that does not match anything. */
+	private compareEncoded(left: readonly [string, string], right: readonly [string, string]): number {
+		if (left[0] !== right[0]) return left[0] < right[0] ? -1 : 1
+		if (left[1] === right[1]) return 0
+
+		return left[1] < right[1] ? -1 : 1
 	}
 
 	/** AWS URI encoding: unreserved characters stay, everything else is percent-encoded uppercase. */

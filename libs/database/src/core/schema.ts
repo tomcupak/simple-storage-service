@@ -14,7 +14,7 @@ import {
 	varchar,
 } from 'drizzle-orm/pg-core'
 
-import { AccessKeyStatus, AuditAction, AuditResult, BucketAcl, BucketPermission, BucketVersioning, MultipartUploadStatus, StorageClass, UserRole, UserStatus } from './types'
+import { AccessKeyStatus, AuditAction, AuditResult, BucketAcl, BucketPermission, BucketVersioning, MultipartUploadStatus, ServerSideEncryption, StorageClass, UserRole, UserStatus } from './types'
 
 export const userRoleType = pgEnum('user_role_type', UserRole)
 export const userStatusType = pgEnum('user_status_type', UserStatus)
@@ -24,6 +24,7 @@ export const bucketAclType = pgEnum('bucket_acl_type', BucketAcl)
 export const bucketVersioningType = pgEnum('bucket_versioning_type', BucketVersioning)
 export const storageClassType = pgEnum('storage_class_type', StorageClass)
 export const multipartUploadStatusType = pgEnum('multipart_upload_status_type', MultipartUploadStatus)
+export const serverSideEncryptionType = pgEnum('server_side_encryption_type', ServerSideEncryption)
 export const auditActionType = pgEnum('audit_action_type', AuditAction)
 export const auditResultType = pgEnum('audit_result_type', AuditResult)
 
@@ -146,6 +147,11 @@ export const objectVersion = pgTable('object_version', {
 	storageClass: storageClassType('storage_class').notNull().default(StorageClass.standard),
 	/** Path of the blob on disk, relative to `STORAGE_DATA_PATH`. */
 	storagePath: varchar('storage_path'),
+	/** How the blob is encrypted at rest - recorded per version, so turning encryption on or
+	 *  off never makes what is already stored unreadable. */
+	encryption: serverSideEncryptionType('encryption').notNull().default(ServerSideEncryption.none),
+	/** The version's data key, wrapped with the deployment master key. Null when unencrypted. */
+	encryptionKey: varchar('encryption_key'),
 	/** `x-amz-meta-*` user metadata. */
 	metadata: jsonb('metadata'),
 	createdByAccessKeyId: varchar('created_by_access_key_id'),
@@ -183,6 +189,8 @@ export const multipartPart = pgTable('multipart_part', {
 	size: bigint('size', { mode: 'number' }).notNull(),
 	etag: varchar('etag').notNull(),
 	storagePath: varchar('storage_path').notNull(),
+	encryption: serverSideEncryptionType('encryption').notNull().default(ServerSideEncryption.none),
+	encryptionKey: varchar('encryption_key'),
 	createdAt,
 }, (t) => [
 	primaryKey({ columns: [t.uploadGuid, t.partNumber] }),

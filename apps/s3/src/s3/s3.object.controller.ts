@@ -11,12 +11,14 @@ import {
 } from '@storage/domains/s3'
 import { Request, Response } from 'express'
 
+import { config } from '../app.config'
 import { S3Identity } from './s3.decorators'
 import { S3Guard } from './s3.guard'
+import { S3RateLimitGuard } from './s3.rate-limit.guard'
 
 /** Object-level S3 operations: `/:bucket/:key`, including the multipart upload sub-resources. */
 @Controller(':bucket/*key')
-@UseGuards(S3Guard)
+@UseGuards(S3Guard, S3RateLimitGuard)
 export class S3ObjectControllerV1 {
 	constructor(
 		private readonly bucketsService: BucketsService,
@@ -33,6 +35,7 @@ export class S3ObjectControllerV1 {
 		// Reading the sub-resource first is what turns `?tagging` and friends into
 		// `NotImplemented` instead of silently writing an object.
 		this.requestService.objectSubResource(req, key)
+		this.requestService.assertSupportedEncryption(req)
 		const uploadId = this.requestService.query(req, 'uploadId')
 		const partNumber = this.requestService.queryNumber(req, 'partNumber')
 		const copySource = this.requestService.copySource(req)
@@ -56,9 +59,11 @@ export class S3ObjectControllerV1 {
 				stream: this.requestService.payloadStream(req, identity),
 				contentMd5: this.requestService.header(req, 'content-md5'),
 				declaredLength: this.requestService.payloadLength(req),
+				maxBytes: config.maxSingleUploadBytes,
 			})
 
 			res.setHeader('ETag', this.requestService.formatEtag(part.etag))
+			this.responseService.applyEncryptionHeader({ res, encryption: part.encryption })
 			res.status(200).end()
 			return
 		}
@@ -79,6 +84,7 @@ export class S3ObjectControllerV1 {
 			})
 
 			if (copied.versionId !== ObjectsTypes.NULL_VERSION_ID) res.setHeader('x-amz-version-id', copied.versionId)
+			this.responseService.applyEncryptionHeader({ res, encryption: copied.encryption })
 			res.type('application/xml').send(this.responseService.copyObjectResult({ etag: copied.etag, lastModified: copied.lastModified }))
 			return
 		}
@@ -90,11 +96,14 @@ export class S3ObjectControllerV1 {
 			contentMd5: this.requestService.header(req, 'content-md5'),
 			accessKeyId: identity.accessKeyId || undefined,
 			declaredLength: this.requestService.payloadLength(req),
+			// A larger object has to come in as a multipart upload, exactly as in S3.
+			maxBytes: config.maxSingleUploadBytes,
 			...this.requestService.objectHeaders(req),
 		})
 
 		res.setHeader('ETag', this.requestService.formatEtag(written.etag))
 		if (written.versionId !== ObjectsTypes.NULL_VERSION_ID) res.setHeader('x-amz-version-id', written.versionId)
+		this.responseService.applyEncryptionHeader({ res, encryption: written.encryption })
 		res.status(200).end()
 	}
 
@@ -126,7 +135,7 @@ export class S3ObjectControllerV1 {
 		this.requestService.assertConditions({ req, etag: version.etag, lastModified: version.lastModified })
 
 		const range = this.requestService.parseRange(req, version.size)
-		const payload = await this.objectsService.readPayload({ storagePath: version.storagePath ?? '', range })
+		const payload = await this.objectsService.readPayload({ storagePath: version.storagePath ?? '', range, encryption: version.encryption })
 
 		this.responseService.applyObjectHeaders({ res, version, overrides: this.requestService.responseOverrides(req) })
 		res.setHeader('Content-Length', String(payload.size))
@@ -201,6 +210,7 @@ export class S3ObjectControllerV1 {
 	async post(@Req() req: Request, @Res() res: Response, @S3Identity() identity: S3Types.RequestIdentity): Promise<void> {
 		const { bucket: bucketName, key } = this.requestService.bucketAndKey(req)
 		const subResource = this.requestService.objectSubResource(req, key)
+		this.requestService.assertSupportedEncryption(req)
 		const uploadId = this.requestService.query(req, 'uploadId')
 
 		const bucket = await this.authorizationService.resolveBucket({ req, name: bucketName, identity, action: S3Types.Action.putObject, key })
@@ -228,6 +238,7 @@ export class S3ObjectControllerV1 {
 		})
 
 		if (completed.versionId !== ObjectsTypes.NULL_VERSION_ID) res.setHeader('x-amz-version-id', completed.versionId)
+		this.responseService.applyEncryptionHeader({ res, encryption: completed.encryption })
 		res.status(200).type('application/xml').send(this.responseService.completeMultipartUpload({
 			bucket: bucketName,
 			key: completed.key,

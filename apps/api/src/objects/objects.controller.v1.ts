@@ -7,6 +7,7 @@ import {
 	ApiForbiddenResponse,
 	ApiNotFoundResponse,
 	ApiOkResponse,
+	ApiPayloadTooLargeResponse,
 	ApiProduces,
 	ApiTags,
 } from '@nestjs/swagger'
@@ -83,6 +84,7 @@ export class ObjectsControllerV1 {
 	@ApiBadRequestResponse({ type: ObjectsDto.ObjectBadRequestError })
 	@ApiNotFoundResponse({ type: ObjectsDto.ObjectNotFoundError })
 	@ApiForbiddenResponse({ type: ObjectsDto.ObjectForbiddenError })
+	@ApiPayloadTooLargeResponse({ type: ObjectsDto.ObjectTooLargeError })
 	async upload(
 		@Param('bucketName') bucketName: string,
 		@Query() query: ObjectsDto.UploadObjectQuery,
@@ -99,9 +101,12 @@ export class ObjectsControllerV1 {
 			contentType: req.headers['content-type'] ?? null,
 			contentMd5: typeof req.headers['content-md5'] === 'string' ? req.headers['content-md5'] : undefined,
 			declaredLength: Number.isFinite(declaredLength) ? declaredLength : undefined,
+			maxBytes: config.body.maxUploadBytes,
 		})
 
-		return { key: query.key, ...written }
+		// Field by field, not a spread: `put` also returns the version's wrapped data key, and
+		// nothing about how an object is encrypted belongs in an answer to its uploader.
+		return { key: query.key, etag: written.etag, size: written.size, versionId: written.versionId }
 	}
 
 	@Get('download')
@@ -123,7 +128,7 @@ export class ObjectsControllerV1 {
 		// A delete marker is a key that is no longer there, not an empty download.
 		if (version.isDeleteMarker || !version.storagePath) throw new ObjectsTypes.ObjectNotFoundError()
 
-		const payload = await this.objectsService.readPayload({ storagePath: version.storagePath })
+		const payload = await this.objectsService.readPayload({ storagePath: version.storagePath, encryption: version.encryption })
 
 		res.setHeader('Content-Type', version.contentType ?? 'application/octet-stream')
 		res.setHeader('Content-Length', String(payload.size))

@@ -78,6 +78,19 @@ export namespace BucketsDto {
 		declare permissions: BucketPermission[]
 	}
 
+	/** A grantee as the access screen needs them: enough to show who a `userGuid` is and to
+	 *  offer them in the picker, without the role/quota/status a full user record carries. */
+	export class BucketUserItem {
+		@ApiProperty({ type: 'string', format: 'uuid' })
+		declare guid: string
+
+		@ApiProperty({ type: 'string', format: 'email' })
+		declare email: string
+
+		@ApiProperty({ type: 'string', nullable: true, required: false })
+		declare name: string | null
+	}
+
 	export class SetBucketGrantBody {
 		@ApiProperty({ type: 'string', format: 'uuid' })
 		@IsUUID()

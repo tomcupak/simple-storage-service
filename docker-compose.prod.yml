@@ -1,0 +1,95 @@
+# A whole deployment in one file: the two apps, the UI, and the two stores they need.
+#
+#   cp .env.sample .env   # then set JWT_SECRET, CRYPTOGRAPHIC_PASSWORD, STORAGE_ENCRYPTION_KEY
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Both apps mount the same object volume: metadata is shared through Postgres, payloads
+# through the filesystem, so neither can be moved to another host on its own.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres-init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    command: [ "valkey-server", "--appendonly", "yes" ]
+    volumes:
+      - valkey-data:/data
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: api
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      VALKEY_HOST: valkey
+      VALKEY_PORT: 6379
+      STORAGE_DATA_PATH: /data/objects
+    volumes:
+      - object-data:/data/objects
+    ports:
+      - "${API_PORT:-10410}:10410"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  s3:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: s3
+    env_file: .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      VALKEY_HOST: valkey
+      VALKEY_PORT: 6379
+      STORAGE_DATA_PATH: /data/objects
+    volumes:
+      - object-data:/data/objects
+    ports:
+      - "${S3_PORT:-10411}:10411"
+    depends_on:
+      # Not just "started": `api` runs the migrations, and the S3 app expects the schema.
+      api:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: web
+    environment:
+      # Where a browser reaches the management API - not the compose network name.
+      API_URL: ${WEB_API_URL:-http://localhost:10410}
+    ports:
+      - "${WEB_PORT:-10412}:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  valkey-data:
+  object-data:

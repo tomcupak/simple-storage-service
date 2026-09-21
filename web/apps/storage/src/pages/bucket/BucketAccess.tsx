@@ -1,25 +1,23 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import { api, type BucketDetail, type BucketGrantItem, BucketPermission, type UserItem, UserRole } from '../../api/client'
+import { api, type BucketDetail, type BucketGrantItem, BucketPermission, type BucketUserItem } from '../../api/client'
 import { EmptyState } from '../../components/EmptyState'
 import { ErrorText } from '../../components/ErrorText'
 import { TableSkeleton } from '../../components/Skeleton'
 import { useI18n } from '../../i18n'
-import { useAuth } from '../../store/auth'
 
 const PERMISSIONS = Object.values(BucketPermission)
 
 /** Who may reach this bucket through the management API and the S3 fallback rules.
  *
- *  Editing needs the user list, and `GET /v1/users` is admin-only - so a non-admin owner sees
- *  the grants read-only rather than a picker that cannot be filled. */
+ *  Both lists come from the bucket: `GET .../grants` and `GET .../users`, each needing `manage`
+ *  on it. Anyone who may open this screen may therefore also edit it - the directory endpoint
+ *  exists so that a bucket manager who is not an admin is no longer stuck with guids. */
 export function BucketAccess({ bucket }: { bucket: BucketDetail }) {
 	const { t } = useI18n()
-	const { user } = useAuth()
-	const isAdmin = user?.role === UserRole.admin
 
 	const [grants, setGrants] = useState<BucketGrantItem[]>([])
-	const [users, setUsers] = useState<UserItem[]>([])
+	const [users, setUsers] = useState<BucketUserItem[]>([])
 	const [loading, setLoading] = useState(true)
 	const [error, setError] = useState<unknown>(null)
 	const [newUserGuid, setNewUserGuid] = useState('')
@@ -28,14 +26,18 @@ export function BucketAccess({ bucket }: { bucket: BucketDetail }) {
 		setLoading(true)
 		setError(null)
 		try {
-			setGrants(await api.listBucketGrants(bucket.name))
-			if (isAdmin) setUsers((await api.listUsers({ limit: 200, page: 1 })).data)
+			const [loadedGrants, loadedUsers] = await Promise.all([
+				api.listBucketGrants(bucket.name),
+				api.listBucketUsers(bucket.name),
+			])
+			setGrants(loadedGrants)
+			setUsers(loadedUsers)
 		} catch (err) {
 			setError(err)
 		} finally {
 			setLoading(false)
 		}
-	}, [bucket.name, isAdmin])
+	}, [bucket.name])
 
 	useEffect(() => { void refresh() }, [refresh])
 
@@ -76,20 +78,17 @@ export function BucketAccess({ bucket }: { bucket: BucketDetail }) {
 		<>
 			<div className="row space-between wrap">
 				<h2>{t('access.title')}</h2>
-				{isAdmin && (
-					<div className="row">
-						<select value={newUserGuid} onChange={(event) => setNewUserGuid(event.target.value)}>
-							<option value="">{t('access.selectUser')}</option>
-							{grantable.map((candidate) => (
-								<option key={candidate.guid} value={candidate.guid}>{candidate.email}</option>
-							))}
-						</select>
-						<button className="primary" disabled={!newUserGuid} onClick={() => void add()}>{t('common.add')}</button>
-					</div>
-				)}
+				<div className="row">
+					<select value={newUserGuid} onChange={(event) => setNewUserGuid(event.target.value)}>
+						<option value="">{t('access.selectUser')}</option>
+						{grantable.map((candidate) => (
+							<option key={candidate.guid} value={candidate.guid}>{candidate.email}</option>
+						))}
+					</select>
+					<button className="primary" disabled={!newUserGuid} onClick={() => void add()}>{t('common.add')}</button>
+				</div>
 			</div>
 
-			{!isAdmin && <p className="muted">{t('access.adminOnly')}</p>}
 			<ErrorText error={error} />
 
 			<div className="card">
@@ -121,7 +120,6 @@ export function BucketAccess({ bucket }: { bucket: BucketDetail }) {
 											<label key={permission} className="checkbox">
 												<input
 													type="checkbox"
-													disabled={!isAdmin}
 													checked={grant.permissions.includes(permission)}
 													onChange={() => toggle(grant, permission)}
 												/>
@@ -131,11 +129,9 @@ export function BucketAccess({ bucket }: { bucket: BucketDetail }) {
 									</div>
 								</td>
 								<td className="right">
-									{isAdmin && (
-										<button className="danger" onClick={() => void setPermissions(grant.userGuid, [])}>
-											{t('common.delete')}
-										</button>
-									)}
+									<button className="danger" onClick={() => void setPermissions(grant.userGuid, [])}>
+										{t('common.delete')}
+									</button>
 								</td>
 							</tr>
 						))}

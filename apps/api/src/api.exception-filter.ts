@@ -4,6 +4,7 @@ import { AuthTypes } from '@storage/domains/auth'
 import { BucketsTypes } from '@storage/domains/buckets'
 import { ObjectsTypes } from '@storage/domains/objects'
 import { PoliciesTypes } from '@storage/domains/policies'
+import { StorageTypes } from '@storage/domains/storage'
 import { UsageTypes } from '@storage/domains/usage'
 import { UsersTypes } from '@storage/domains/users'
 import { Response } from 'express'
@@ -23,6 +24,7 @@ const DOMAIN_ERRORS: [new (...args: never[]) => Error, HttpStatus][] = [
 	[UsersTypes.EmailAlreadyUsedError, HttpStatus.BAD_REQUEST],
 	[UsersTypes.LastAdminError, HttpStatus.BAD_REQUEST],
 	[UsersTypes.LastAdminDemotedError, HttpStatus.BAD_REQUEST],
+	[UsersTypes.InvalidCurrentPasswordError, HttpStatus.BAD_REQUEST],
 
 	[AccessKeysTypes.AccessKeyNotFoundError, HttpStatus.NOT_FOUND],
 	[AccessKeysTypes.AccessKeyInactiveError, HttpStatus.BAD_REQUEST],
@@ -42,6 +44,8 @@ const DOMAIN_ERRORS: [new (...args: never[]) => Error, HttpStatus][] = [
 	[ObjectsTypes.ObjectAlreadyExistsError, HttpStatus.BAD_REQUEST],
 	[ObjectsTypes.BadDigestError, HttpStatus.BAD_REQUEST],
 	[ObjectsTypes.InvalidRangeError, HttpStatus.BAD_REQUEST],
+	[StorageTypes.PayloadTooLargeError, HttpStatus.PAYLOAD_TOO_LARGE],
+	[StorageTypes.EncryptionKeyError, HttpStatus.INTERNAL_SERVER_ERROR],
 
 	[PoliciesTypes.InvalidPolicyDocumentError, HttpStatus.BAD_REQUEST],
 	[PoliciesTypes.PolicyNotFoundError, HttpStatus.NOT_FOUND],

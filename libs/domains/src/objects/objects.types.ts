@@ -1,6 +1,8 @@
 import { BucketVersioning, StorageClass } from '@storage/database'
 import { Readable } from 'stream'
 
+import { StorageTypes } from '../storage/storage.types'
+
 export namespace ObjectsTypes {
 	/** Version id used for objects in a bucket that has versioning disabled. */
 	export const NULL_VERSION_ID = 'null'
@@ -47,12 +49,16 @@ export namespace ObjectsTypes {
 		/** Size the client announced, used to reject an over-quota write before it is streamed.
 		 *  The real size is checked again once the payload is on disk. */
 		declaredLength?: number
+		/** Largest payload this endpoint accepts at all, independent of any quota. */
+		maxBytes?: number
 	}
 
 	export interface PutObjectResult {
 		versionId: string
 		etag: string
 		size: number
+		/** How the payload was stored, for `x-amz-server-side-encryption` on the response. */
+		encryption?: StorageTypes.BlobEncryption
 	}
 
 	/** One stored version with everything `GetObject`/`HeadObject` need to answer. */
@@ -66,6 +72,8 @@ export namespace ObjectsTypes {
 		size: number
 		etag: string
 		storagePath: string | null
+		/** How the blob is encrypted at rest; null when it is stored in the clear. */
+		encryption: StorageTypes.BlobEncryption | null
 		contentType: string | null
 		contentEncoding: string | null
 		cacheControl: string | null

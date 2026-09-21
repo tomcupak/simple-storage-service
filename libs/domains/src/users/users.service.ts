@@ -32,6 +32,23 @@ export class UsersService {
 		return Api.paginate({ data: rows.map((row) => this.toItem(row)), totalRecords, limit, page })
 	}
 
+	/** Everyone a grant could name, reduced to guid, e-mail and name. `list` is admin-only
+	 *  because it exposes roles, quotas and sign-in times; this carries none of that, so a
+	 *  bucket manager can be handed it to turn the guids on their grants into people. */
+	async listDirectory(): Promise<UsersTypes.UserDirectoryItem[]> {
+		const rows = await this.db.core
+			.select({
+				guid: coreSchema.user.guid,
+				email: coreSchema.user.email,
+				name: coreSchema.user.name,
+			})
+			.from(coreSchema.user)
+			.where(and(eq(coreSchema.user.status, UserStatus.active), isNull(coreSchema.user.deletedAt)))
+			.orderBy(asc(coreSchema.user.email))
+
+		return rows
+	}
+
 	async get(guid: string): Promise<UsersTypes.UserItem> {
 		const [found] = await this.db.core
 			.select()
@@ -114,14 +131,40 @@ export class UsersService {
 		if (updated.length === 0) throw new UsersTypes.UserNotFoundError()
 	}
 
-	async setPassword(guid: string, password: string): Promise<void> {
-		const updated = await this.db.core
+	/** Sets a password, and ends every session the account had.
+	 *
+	 *  Whether the current password has to be proven is decided here from `actorGuid` rather
+	 *  than by the caller passing a flag: someone changing their own password must know it - a
+	 *  stolen access token is otherwise enough to take the account over - while an admin
+	 *  resetting somebody else's cannot know it and is trusted by role instead.
+	 *
+	 *  Revoking the sessions is the other half. A refresh token outlives an access token by
+	 *  weeks, so a password change that left them alive would lock nobody out. */
+	async setPassword({ guid, password, currentPassword, actorGuid }: {
+		guid: string
+		password: string
+		currentPassword?: string
+		/** Who is making the change; the same guid means it is a self-service change. */
+		actorGuid: string
+	}): Promise<void> {
+		const [found] = await this.db.core
+			.select()
+			.from(coreSchema.user)
+			.where(and(eq(coreSchema.user.guid, guid), isNull(coreSchema.user.deletedAt)))
+			.limit(1)
+
+		if (!found) throw new UsersTypes.UserNotFoundError()
+
+		if (actorGuid === guid && !this.authService.verifyPassword(currentPassword ?? '', found.passwordHash)) {
+			throw new UsersTypes.InvalidCurrentPasswordError()
+		}
+
+		await this.db.core
 			.update(coreSchema.user)
 			.set({ passwordHash: this.authService.hashPassword(password), updatedAt: new Date() })
-			.where(and(eq(coreSchema.user.guid, guid), isNull(coreSchema.user.deletedAt)))
-			.returning()
+			.where(eq(coreSchema.user.guid, guid))
 
-		if (updated.length === 0) throw new UsersTypes.UserNotFoundError()
+		await this.authService.revokeSessions(guid)
 	}
 
 	async delete(guid: string): Promise<void> {

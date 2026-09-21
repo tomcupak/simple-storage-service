@@ -3,6 +3,7 @@ import { BucketVersioning } from '@storage/database'
 import { Response } from 'express'
 
 import { ObjectsTypes } from '../objects/objects.types'
+import { StorageTypes } from '../storage/storage.types'
 import { S3Exception } from './s3.exception'
 import { S3Types } from './s3.types'
 import { S3XmlService } from './s3.xml.service'
@@ -229,6 +230,7 @@ export class S3ResponseService {
 		res.setHeader('Accept-Ranges', 'bytes')
 		res.setHeader('x-amz-version-id', version.versionId)
 		if (version.storageClass) res.setHeader('x-amz-storage-class', version.storageClass)
+		this.applyEncryptionHeader({ res, encryption: version.encryption })
 
 		const header = (name: string, stored: string | null | undefined, override?: string) => {
 			const value = override ?? stored
@@ -245,6 +247,15 @@ export class S3ResponseService {
 		for (const [name, value] of Object.entries(version.metadata ?? {})) {
 			res.setHeader(`x-amz-meta-${name}`, value)
 		}
+	}
+
+	/** `x-amz-server-side-encryption: AES256` on every answer about an encrypted object, and
+	 *  nothing at all about one stored in the clear - which is exactly how S3 reports it. */
+	applyEncryptionHeader({ res, encryption }: {
+		res: Response
+		encryption?: StorageTypes.BlobEncryption | null
+	}): void {
+		if (encryption) res.setHeader('x-amz-server-side-encryption', encryption.algorithm)
 	}
 
 	/** Echoes the CORS rule that matched back to the browser. */

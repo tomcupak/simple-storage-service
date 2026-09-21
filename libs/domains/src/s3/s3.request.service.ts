@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { BucketAcl, StorageClass } from '@storage/database'
+import { BucketAcl, ServerSideEncryption, StorageClass } from '@storage/database'
 import { Request } from 'express'
 import { Readable } from 'stream'
 
@@ -254,6 +254,22 @@ export class S3RequestService {
 			[PoliciesTypes.ConditionKeys.delimiter]: this.query(req, 'delimiter'),
 			[PoliciesTypes.ConditionKeys.maxKeys]: this.query(req, 'max-keys'),
 			[PoliciesTypes.ConditionKeys.acl]: this.header(req, 'x-amz-acl'),
+		}
+	}
+
+	/** `x-amz-server-side-encryption` on a write.
+	 *
+	 *  Whether a payload is encrypted is a property of the deployment, not of the request, so
+	 *  the header cannot turn encryption on for one object - it can only ask for an algorithm.
+	 *  `AES256` is the only one there is; `aws:kms` and friends are refused rather than
+	 *  silently downgraded to it, because a caller asking for a managed key would otherwise
+	 *  believe it got one. */
+	assertSupportedEncryption(req: Request): void {
+		const requested = this.header(req, 'x-amz-server-side-encryption')
+		if (!requested) return
+
+		if (requested !== String(ServerSideEncryption.aes256)) {
+			throw new S3Exception('InvalidArgument', 'x-amz-server-side-encryption', `Server Side Encryption with ${requested} is not supported`)
 		}
 	}
 

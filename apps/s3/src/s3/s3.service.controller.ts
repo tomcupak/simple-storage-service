@@ -5,10 +5,11 @@ import { S3Exception, S3Types, S3XmlService } from '@storage/domains/s3'
 
 import { S3Identity } from './s3.decorators'
 import { S3Guard } from './s3.guard'
+import { S3RateLimitGuard } from './s3.rate-limit.guard'
 
 /** Service-level S3 operations (no bucket in the path): today only `ListBuckets`. */
 @Controller()
-@UseGuards(S3Guard)
+@UseGuards(S3Guard, S3RateLimitGuard)
 export class S3ServiceControllerV1 {
 	constructor(
 		private readonly bucketsService: BucketsService,

@@ -37,6 +37,10 @@ const DOMAIN_ERRORS: [new (...args: never[]) => Error, S3Types.ErrorCode][] = [
 	[S3Types.MalformedBodyError, 'IncompleteBody'],
 	[S3Types.SignatureMismatchError, 'SignatureDoesNotMatch'],
 	[StorageTypes.BlobNotFoundError, 'NoSuchKey'],
+	[StorageTypes.PayloadTooLargeError, 'EntityTooLarge'],
+	// The object is there and its key is right; the deployment cannot open it. That is an
+	// internal fault, not something the caller could have sent differently.
+	[StorageTypes.EncryptionKeyError, 'InternalError'],
 ]
 
 /** Every failure leaving the S3 app must be an S3-shaped XML `<Error>` document - AWS SDKs
@@ -61,6 +65,7 @@ export class S3ExceptionFilter implements ExceptionFilter {
 		}
 
 		this.logger.error(exception)
+		res.locals.s3ErrorCode = 'InternalError'
 		const definition = S3Types.ErrorCodes.InternalError
 		res
 			.status(definition.status)
@@ -69,6 +74,9 @@ export class S3ExceptionFilter implements ExceptionFilter {
 	}
 
 	private send(res: Response, exception: S3Exception): void {
+		// Left for the request log, which runs on `finish` and would otherwise only see a status.
+		res.locals.s3ErrorCode = exception.errorCode
+
 		// 304 must not carry a body, and Express drops one silently only for some transports.
 		if (exception.getStatus() === S3Types.ErrorCodes.NotModified.status) {
 			res.status(exception.getStatus()).end()

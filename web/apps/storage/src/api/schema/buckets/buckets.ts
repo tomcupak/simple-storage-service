@@ -9,6 +9,7 @@ import type {
   BucketDetail,
   BucketGrantItem,
   BucketItem,
+  BucketUserItem,
   CreateBucketBody,
   SetBucketAclBody,
   SetBucketGrantBody,
@@ -116,6 +117,14 @@ const bucketsControllerV1ListV1 = (
     },
       );
     }
+  const bucketsControllerV1ListUsersV1 = (
+    bucketName: string,
+ ) => {
+      return customInstance<BucketUserItem[]>(
+      {url: `/v1/buckets/${bucketName}/users`, method: 'GET'
+    },
+      );
+    }
   const bucketsControllerV1RemoveGrantV1 = (
     bucketName: string,
     userGuid: string,
@@ -125,7 +134,7 @@ const bucketsControllerV1ListV1 = (
     },
       );
     }
-  return {bucketsControllerV1ListV1,bucketsControllerV1CreateV1,bucketsControllerV1GetV1,bucketsControllerV1DeleteV1,bucketsControllerV1SetAclV1,bucketsControllerV1SetVersioningV1,bucketsControllerV1SetQuotaV1,bucketsControllerV1UsageV1,bucketsControllerV1ListGrantsV1,bucketsControllerV1SetGrantV1,bucketsControllerV1RemoveGrantV1}};
+  return {bucketsControllerV1ListV1,bucketsControllerV1CreateV1,bucketsControllerV1GetV1,bucketsControllerV1DeleteV1,bucketsControllerV1SetAclV1,bucketsControllerV1SetVersioningV1,bucketsControllerV1SetQuotaV1,bucketsControllerV1UsageV1,bucketsControllerV1ListGrantsV1,bucketsControllerV1SetGrantV1,bucketsControllerV1ListUsersV1,bucketsControllerV1RemoveGrantV1}};
 export type BucketsControllerV1ListV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1ListV1']>>>
 export type BucketsControllerV1CreateV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1CreateV1']>>>
 export type BucketsControllerV1GetV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1GetV1']>>>
@@ -136,4 +145,5 @@ export type BucketsControllerV1SetQuotaV1Result = NonNullable<Awaited<ReturnType
 export type BucketsControllerV1UsageV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1UsageV1']>>>
 export type BucketsControllerV1ListGrantsV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1ListGrantsV1']>>>
 export type BucketsControllerV1SetGrantV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1SetGrantV1']>>>
+export type BucketsControllerV1ListUsersV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1ListUsersV1']>>>
 export type BucketsControllerV1RemoveGrantV1Result = NonNullable<Awaited<ReturnType<ReturnType<typeof getBuckets>['bucketsControllerV1RemoveGrantV1']>>>

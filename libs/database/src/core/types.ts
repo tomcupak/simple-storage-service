@@ -47,6 +47,14 @@ export enum StorageClass {
 	standard = 'STANDARD',
 }
 
+/** How an object version's payload is stored on disk. `AES256` is the one algorithm SSE-S3
+ *  uses, and the value S3 reports in `x-amz-server-side-encryption`; `none` means the blob is
+ *  stored in the clear, which is what every object written before encryption was switched on is. */
+export enum ServerSideEncryption {
+	none = 'none',
+	aes256 = 'AES256',
+}
+
 export enum MultipartUploadStatus {
 	inProgress = 'in-progress',
 	completed = 'completed',

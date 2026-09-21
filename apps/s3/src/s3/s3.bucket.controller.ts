@@ -16,11 +16,12 @@ import { Request, Response } from 'express'
 import { config } from '../app.config'
 import { S3Identity } from './s3.decorators'
 import { S3Guard } from './s3.guard'
+import { S3RateLimitGuard } from './s3.rate-limit.guard'
 
 /** Bucket-level S3 operations: `/:bucket` with the operation selected by the HTTP verb and the
  *  `?subresource` query parameter (`?versioning`, `?policy`, `?cors`, `?uploads`, ...). */
 @Controller(':bucket')
-@UseGuards(S3Guard)
+@UseGuards(S3Guard, S3RateLimitGuard)
 export class S3BucketControllerV1 {
 	constructor(
 		private readonly bucketsService: BucketsService,

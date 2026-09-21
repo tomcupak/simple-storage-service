@@ -73,6 +73,16 @@ export class AuthService {
 			.where(eq(coreSchema.userSession.refreshTokenHash, this.hashRefreshToken(refreshToken)))
 	}
 
+	/** Ends every session a user holds. Called when their password changes: whoever knew the
+	 *  old one may be holding a refresh token, and rotating the password has to take that
+	 *  token with it or the change protects nothing. */
+	async revokeSessions(userGuid: string): Promise<void> {
+		await this.db.core
+			.update(coreSchema.userSession)
+			.set({ revokedAt: new Date() })
+			.where(and(eq(coreSchema.userSession.userGuid, userGuid), isNull(coreSchema.userSession.revokedAt)))
+	}
+
 	verifyAccessToken(token: string): AuthTypes.Identity | null {
 		try {
 			const payload = jwt.verify(token, this.config.secret, { issuer: this.config.issuer }) as AuthTypes.AccessTokenPayload

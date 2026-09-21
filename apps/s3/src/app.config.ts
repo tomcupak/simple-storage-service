@@ -7,6 +7,8 @@ export const config = {
 	...ConfigProvider.storage,
 	...ConfigProvider.cryptographic,
 	...ConfigProvider.s3,
+	...ConfigProvider.valkey,
+	...ConfigProvider.rateLimit,
 
 	/** Largest single PUT accepted; larger payloads must use multipart upload (as in S3). */
 	maxSingleUploadBytes: Number(process.env.S3_MAX_SINGLE_UPLOAD_BYTES || 5 * 1024 * 1024 * 1024),

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { BucketVersioning, coreSchema, DbProvider, MultipartUploadStatus, StorageClass } from '@storage/database'
+import { BucketVersioning, coreSchema, DbProvider, MultipartUploadStatus, ServerSideEncryption, StorageClass } from '@storage/database'
 import * as crypto from 'crypto'
 import { and, asc, desc, eq, gt, SQL,sql } from 'drizzle-orm'
 import { AnyPgColumn } from 'drizzle-orm/pg-core'
@@ -198,14 +198,15 @@ export class ObjectsService {
 
 	/** Streams a payload to disk and records it as the key's newest version.
 	 *  In an unversioned (or suspended) bucket the `null` version is replaced in place. */
-	async put({ bucket, key, stream, contentMd5, accessKeyId, declaredLength, ...headers }: ObjectsTypes.PutObjectParams): Promise<ObjectsTypes.PutObjectResult> {
+	async put({ bucket, key, stream, contentMd5, accessKeyId, declaredLength, maxBytes, ...headers }: ObjectsTypes.PutObjectParams): Promise<ObjectsTypes.PutObjectResult> {
 		this.assertValidKey(key)
+		this.assertWithinMaxBytes(declaredLength, maxBytes)
 		// Rejecting an announced over-quota write up front saves streaming a payload that would
 		// only be deleted again; the real size is re-checked once it is on disk, because a
 		// client's `Content-Length` is a claim, not a guarantee.
 		await this.usageService.assertQuota({ bucket, bytes: declaredLength ?? 0 })
 
-		const written = await this.storageService.write(stream)
+		const written = await this.storageService.write(stream, { maxBytes })
 
 		try {
 			this.assertContentMd5(contentMd5, written.etag)
@@ -225,13 +226,14 @@ export class ObjectsService {
 				etag: written.etag,
 				storagePath: written.storagePath,
 				createdByAccessKeyId: accessKeyId ?? null,
+				...this.toEncryptionColumns(written.encryption),
 				...this.toVersionColumns(headers),
 			},
 		})
 
 		await this.deleteBlobs(replaced)
 
-		return { versionId, etag: written.etag, size: written.size }
+		return { versionId, etag: written.etag, size: written.size, encryption: written.encryption }
 	}
 
 	/** Copies an existing version's bytes into a new object version (`CopyObject`). */
@@ -244,7 +246,7 @@ export class ObjectsService {
 	} & ObjectsTypes.ObjectHeaders): Promise<ObjectsTypes.PutObjectResult & { lastModified: Date }> {
 		if (!source.storagePath) throw new ObjectsTypes.ObjectNotFoundError()
 
-		const { stream } = await this.storageService.read(source.storagePath)
+		const { stream } = await this.storageService.read(source.storagePath, { encryption: source.encryption })
 		const inherited: ObjectsTypes.ObjectHeaders = metadataDirective === ObjectsTypes.MetadataDirective.replace
 			? headers
 			: {
@@ -283,9 +285,15 @@ export class ObjectsService {
 		return this.toVersionDetail({ key: found.key, latestVersionGuid: found.latestVersionGuid, version })
 	}
 
-	/** Opens the stored payload, optionally a byte range of it. */
-	async readPayload({ storagePath, range }: { storagePath: string, range?: StorageTypes.ReadRange }): Promise<StorageTypes.ReadResult> {
-		return this.storageService.read(storagePath, range)
+	/** Opens the stored payload, optionally a byte range of it. The encryption descriptor comes
+	 *  from the version row: it is what makes the blob readable, and it is per version rather
+	 *  than per deployment. */
+	async readPayload({ storagePath, range, encryption }: {
+		storagePath: string
+		range?: StorageTypes.ReadRange
+		encryption?: StorageTypes.BlobEncryption | null
+	}): Promise<StorageTypes.ReadResult> {
+		return this.storageService.read(storagePath, { range, encryption })
 	}
 
 	/** `DeleteObject`: a hard delete in an unversioned bucket, a delete marker otherwise.
@@ -485,22 +493,24 @@ export class ObjectsService {
 	}
 
 	/** Stores one part's bytes. Re-uploading a part number replaces the previous blob. */
-	async uploadPart({ bucket, uploadId, partNumber, stream, contentMd5, declaredLength }: {
+	async uploadPart({ bucket, uploadId, partNumber, stream, contentMd5, declaredLength, maxBytes }: {
 		bucket: ObjectsTypes.BucketContext
 		uploadId: string
 		partNumber: number
 		stream: Readable
 		contentMd5?: string
 		declaredLength?: number
-	}): Promise<{ etag: string, size: number }> {
+		maxBytes?: number
+	}): Promise<{ etag: string, size: number, encryption?: StorageTypes.BlobEncryption }> {
 		const upload = await this.requireUpload({ bucketGuid: bucket.guid, uploadId })
 		if (partNumber < 1 || partNumber > 10_000) throw new ObjectsTypes.InvalidPartError()
+		this.assertWithinMaxBytes(declaredLength, maxBytes)
 
 		// Parts occupy disk from the moment they land, so they count against the quota now
 		// rather than at `CompleteMultipartUpload`.
 		await this.usageService.assertQuota({ bucket, bytes: declaredLength ?? 0 })
 
-		const written = await this.storageService.write(stream)
+		const written = await this.storageService.write(stream, { maxBytes })
 
 		try {
 			this.assertContentMd5(contentMd5, written.etag)
@@ -516,17 +526,24 @@ export class ObjectsService {
 			.where(and(eq(coreSchema.multipartPart.uploadGuid, upload.guid), eq(coreSchema.multipartPart.partNumber, partNumber)))
 			.limit(1)
 
+		const partValues = {
+			size: written.size,
+			etag: written.etag,
+			storagePath: written.storagePath,
+			...this.toEncryptionColumns(written.encryption),
+		}
+
 		await this.db.core
 			.insert(coreSchema.multipartPart)
-			.values({ uploadGuid: upload.guid, partNumber, size: written.size, etag: written.etag, storagePath: written.storagePath })
+			.values({ uploadGuid: upload.guid, partNumber, ...partValues })
 			.onConflictDoUpdate({
 				target: [coreSchema.multipartPart.uploadGuid, coreSchema.multipartPart.partNumber],
-				set: { size: written.size, etag: written.etag, storagePath: written.storagePath },
+				set: partValues,
 			})
 
 		if (previous) await this.deleteBlobs([previous.storagePath])
 
-		return { etag: written.etag, size: written.size }
+		return { etag: written.etag, size: written.size, encryption: written.encryption }
 	}
 
 	/** `UploadPartCopy`: the part's bytes come from an existing object version. */
@@ -536,10 +553,10 @@ export class ObjectsService {
 		partNumber: number
 		source: ObjectsTypes.ObjectVersionDetail
 		range?: StorageTypes.ReadRange
-	}): Promise<{ etag: string, size: number, lastModified: Date }> {
+	}): Promise<{ etag: string, size: number, encryption?: StorageTypes.BlobEncryption, lastModified: Date }> {
 		if (!source.storagePath) throw new ObjectsTypes.ObjectNotFoundError()
 
-		const { stream } = await this.storageService.read(source.storagePath, range)
+		const { stream } = await this.storageService.read(source.storagePath, { range, encryption: source.encryption })
 		const result = await this.uploadPart({ bucket, uploadId, partNumber, stream })
 
 		return { ...result, lastModified: source.lastModified }
@@ -563,7 +580,10 @@ export class ObjectsService {
 
 		const ordered = this.matchRequestedParts({ requested: parts, stored })
 
-		const concatenated = await this.storageService.concat(ordered.map((part) => part.storagePath))
+		const concatenated = await this.storageService.concat(ordered.map((part) => ({
+			storagePath: part.storagePath,
+			encryption: this.toBlobEncryption(part),
+		})))
 		const etag = this.multipartEtag(ordered.map((part) => part.etag))
 		const versionId = this.nextVersionId(bucket.versioning)
 
@@ -575,6 +595,7 @@ export class ObjectsService {
 				size: concatenated.size,
 				etag,
 				storagePath: concatenated.storagePath,
+				...this.toEncryptionColumns(concatenated.encryption),
 				createdByAccessKeyId: upload.initiatedByAccessKeyId,
 				contentType: upload.contentType,
 				contentEncoding: upload.contentEncoding,
@@ -593,7 +614,7 @@ export class ObjectsService {
 		await this.db.core.delete(coreSchema.multipartPart).where(eq(coreSchema.multipartPart.uploadGuid, upload.guid))
 		await this.deleteBlobs([...stored.map((part) => part.storagePath), ...replaced])
 
-		return { key: upload.key, versionId, etag, size: concatenated.size }
+		return { key: upload.key, versionId, etag, size: concatenated.size, encryption: concatenated.encryption }
 	}
 
 	async abortMultipartUpload({ bucketGuid, uploadId }: { bucketGuid: string, uploadId: string }): Promise<void> {
@@ -829,6 +850,14 @@ export class ObjectsService {
 		return rows.map((row) => row.key)
 	}
 
+	/** Refuses an announced payload larger than the endpoint accepts before a byte is read.
+	 *  `StorageService` enforces the same ceiling on the bytes that actually arrive - this only
+	 *  spares both sides the transfer when the client is honest about the size. */
+	private assertWithinMaxBytes(declaredLength: number | undefined, maxBytes: number | undefined): void {
+		if (maxBytes === undefined || declaredLength === undefined) return
+		if (declaredLength > maxBytes) throw new StorageTypes.PayloadTooLargeError()
+	}
+
 	/** S3's key rules: non-empty, at most 1024 UTF-8 bytes and free of control characters. */
 	private assertValidKey(key: string): void {
 		if (!key) throw new ObjectsTypes.InvalidKeyError()
@@ -973,6 +1002,24 @@ export class ObjectsService {
 			: ObjectsTypes.NULL_VERSION_ID
 	}
 
+	/** How a fresh write is recorded on its row. An unencrypted blob is `none` with no key
+	 *  rather than a null column, so "stored in the clear" is stated and not merely absent. */
+	private toEncryptionColumns(encryption: StorageTypes.BlobEncryption | undefined): {
+		encryption: ServerSideEncryption
+		encryptionKey: string | null
+	} {
+		return encryption
+			? { encryption: encryption.algorithm, encryptionKey: encryption.wrappedKey }
+			: { encryption: ServerSideEncryption.none, encryptionKey: null }
+	}
+
+	/** The reverse: what a stored row says about how to read its blob back. */
+	private toBlobEncryption(row: { encryption: ServerSideEncryption, encryptionKey: string | null }): StorageTypes.BlobEncryption | null {
+		if (row.encryption !== ServerSideEncryption.aes256 || !row.encryptionKey) return null
+
+		return { algorithm: ServerSideEncryption.aes256, wrappedKey: row.encryptionKey }
+	}
+
 	private toVersionColumns(headers: ObjectsTypes.ObjectHeaders): Partial<typeof coreSchema.objectVersion.$inferInsert> {
 		return {
 			contentType: headers.contentType ?? null,
@@ -999,6 +1046,7 @@ export class ObjectsService {
 			size: version.size,
 			etag: version.etag,
 			storagePath: version.storagePath,
+			encryption: this.toBlobEncryption(version),
 			contentType: version.contentType,
 			contentEncoding: version.contentEncoding,
 			cacheControl: version.cacheControl,

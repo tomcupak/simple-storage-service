@@ -8,6 +8,7 @@ export namespace UsersDto {
 		USER_NOT_FOUND = 'user_not_found',
 		EMAIL_ALREADY_USED = 'email_already_used',
 		LAST_ADMIN = 'last_admin',
+		INVALID_CURRENT_PASSWORD = 'invalid_current_password',
 	}
 
 	export class UserItem {
@@ -61,6 +62,15 @@ export namespace UsersDto {
 		@IsString()
 		@MinLength(8)
 		declare password: string
+
+		@ApiProperty({
+			type: 'string',
+			required: false,
+			description: 'Required when changing your own password; an admin resetting someone else\'s omits it',
+		})
+		@IsOptional()
+		@IsString()
+		declare currentPassword?: string
 	}
 
 	export class UpdateUserBody {
@@ -89,4 +99,5 @@ export namespace UsersDto {
 	export class UserNotFoundError extends Api.createErrorDto([ErrorCodes.USER_NOT_FOUND]) {}
 	export class CreateUserBadRequestError extends Api.createErrorDto([ErrorCodes.EMAIL_ALREADY_USED]) {}
 	export class DeleteUserBadRequestError extends Api.createErrorDto([ErrorCodes.LAST_ADMIN]) {}
+	export class SetPasswordBadRequestError extends Api.createErrorDto([ErrorCodes.INVALID_CURRENT_PASSWORD]) {}
 }

@@ -63,3 +63,27 @@ jobs:
 
       - name: Build (web)
         run: npm run build:web-storage
+
+  # The Dockerfile is a deliverable like any other: it breaks in ways the Node build does not
+  # (a lockfile `npm ci` will not accept, a missing migration copy), and only building it finds
+  # them. Nothing is pushed here - `release.yml` does that, on a tag.
+  images:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        target: [api, s3, web]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: ${{ matrix.target }}
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

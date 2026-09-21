@@ -16,6 +16,7 @@ export namespace ObjectsDto {
 		BUCKET_QUOTA_EXCEEDED = 'bucket_quota_exceeded',
 		USER_QUOTA_EXCEEDED = 'user_quota_exceeded',
 		NO_USABLE_ACCESS_KEY = 'no_usable_access_key',
+		PAYLOAD_TOO_LARGE = 'payload_too_large',
 	}
 
 	/** Longest lifetime a shared link may be given - SigV4's own ceiling. */
@@ -233,4 +234,6 @@ export namespace ObjectsDto {
 	]) {}
 
 	export class ObjectForbiddenError extends Api.createErrorDto([ErrorCodes.PERMISSION_DENIED]) {}
+
+	export class ObjectTooLargeError extends Api.createErrorDto([ErrorCodes.PAYLOAD_TOO_LARGE]) {}
 }

@@ -8,4 +8,6 @@
 
 export interface SetPasswordBody {
   password: string;
+  /** Required when changing your own password; an admin resetting someone else's omits it */
+  currentPassword?: string;
 }
