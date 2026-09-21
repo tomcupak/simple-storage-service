@@ -1,0 +1,18 @@
+#!/command/with-contenv sh
+# The metadata store. Bound to the loopback address only: nothing outside this container has any
+# business talking to it, and `--network host` would otherwise put it on the machine's loopback.
+exec 2>&1
+
+echo "postgres: starting on 127.0.0.1:${POSTGRES_PORT}"
+
+# POSTGRES_EXTRA_ARGS is a command line and is split on purpose - it is how a deployment reaches
+# the settings this image does not give a variable of its own.
+# shellcheck disable=SC2086
+exec s6-setuidgid postgres postgres \
+	-D "$PGDATA" \
+	-c listen_addresses=127.0.0.1 \
+	-c port="$POSTGRES_PORT" \
+	-c unix_socket_directories=/run/postgresql \
+	-c shared_buffers="$POSTGRES_SHARED_BUFFERS" \
+	-c max_connections="$POSTGRES_MAX_CONNECTIONS" \
+	$POSTGRES_EXTRA_ARGS

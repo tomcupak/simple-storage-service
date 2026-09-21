@@ -395,6 +395,8 @@ Temporary Items
 =======
 # Local
 .env
+# The standalone container's secrets - the .sample next to it is the one that is committed
+.env.standalone
 dist
 dist-deploy
 .cache

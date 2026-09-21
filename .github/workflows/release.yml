@@ -52,3 +52,73 @@ jobs:
           # The three targets share the `build` stage, so they also share its cache.
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # The standalone image is built and published separately from the three composable ones: it has
+  # its own registry (Docker Hub, where someone looking for "an S3 server in a container" looks
+  # first) and its own documentation, which is the repository page itself.
+  standalone:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Docker Hub is optional: without the two secrets and the repository variable, the image is
+      # still built and pushed to ghcr, and only the Hub steps are skipped.
+      - id: hub
+        run: echo "enabled=${{ vars.DOCKERHUB_REPOSITORY != '' && secrets.DOCKERHUB_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+
+      - if: steps.hub.outputs.enabled == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.REGISTRY }}/${{ github.repository }}/standalone
+            ${{ steps.hub.outputs.enabled == 'true' && format('docker.io/{0}', vars.DOCKERHUB_REPOSITORY) || '' }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: standalone
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # amd64 only: the image would build for arm64, but under QEMU the webpack build and two
+          # npm installs take long enough that it belongs behind a deliberate choice rather than
+          # in every release. Add linux/arm64 here when someone needs it.
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The Docker Hub page is documentation like any other, so it lives in the repository and is
+      # published from it - a description edited in the web UI would be overwritten by the next
+      # release, which is the point.
+      - if: steps.hub.outputs.enabled == 'true'
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ vars.DOCKERHUB_REPOSITORY }}
+          short-description: 'S3-compatible object storage with a management UI, in one container'
+          readme-filepath: docker/standalone/DOCKERHUB.md

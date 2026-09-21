@@ -13,7 +13,7 @@ libs/domains  Doménová logika, DTO, moduly sdílené oběma aplikacemi
 libs/database Drizzle schéma, migrace a helpery pro integrační testy
 libs/shared   Obecné helpery bez doménového kontextu
 web           React UI (Vite)
-docker        Dockerfile (api / s3 / web) a init skript Postgresu
+docker        Dockerfile (api / s3 / web / standalone) a supervision tree standalone obrazu
 deploy        systemd unity pro nasazení bez kontejnerů
 ```
 
@@ -86,6 +86,42 @@ na začátku není platný název bucketu, takže cesty nekolidují.
 Kompletní seznam proměnných prostředí je v [.env.sample](.env.sample).
 
 ## Nasazení
+
+### Standalone kontejner (jeden obraz, celý produkt)
+
+Obě aplikace, UI, Postgres i Valkey v jednom Alpine obrazu — pro nasazení, které chce úložiště,
+ne topologii. Procesy hlídá s6-overlay, spouští je v pořadí podle závislostí a jeden SIGTERM je
+zase složí.
+
+```bash
+docker build -f docker/Dockerfile --target standalone -t storage .
+
+cp .env.standalone.sample .env.standalone   # vyplňte pět povinných hodnot
+docker compose -f docker-compose.standalone.yml up -d --build
+```
+
+UI běží na **4242** (management API je pod `/api` na stejném originu, takže odpadá CORS),
+S3 endpoint na **443** — portu, na kterém S3 provozuje AWS.
+
+Kontejner odmítne nastartovat bez pěti proměnných, které mají v kódu funkční default, a právě
+to je problém: `JWT_SECRET`, `CRYPTOGRAPHIC_PASSWORD`, `STORAGE_ENCRYPTION_KEY`,
+`BOOTSTRAP_ADMIN_PASSWORD` a `S3_PUBLIC_URL`. Vypíše je všechny najednou a skončí. Ostatní
+proměnné z [.env.sample](.env.sample) fungují i tady, plus knoby pro vestavěný Postgres, Valkey
+a nginx — kompletní seznam je v [docker/standalone/DOCKERHUB.md](docker/standalone/DOCKERHUB.md).
+
+Všechno perzistentní leží pod jedním rootem `/data` (objekty, Postgres cluster, Valkey), takže
+se mountuje a zálohuje jedna věc. **Volume je povinný** a záleží na tom, jaký filesystém pod ním
+je: Postgres i blob store potřebují, aby jádro drželo `fsync` a zámky tak, jak to dělá lokální
+filesystém. Nativní linuxový FS (ext4, XFS, ZFS) ano — sdílené složky Docker Desktopu na Windows
+a macOS (virtiofs, gRPC-FUSE, 9p) ani NFS/SMB ne. Kontejner při startu vypíše, na čem `/data`
+leží, a u pomalých případů varuje.
+
+Dokumentace pro Docker Hub je [docker/standalone/DOCKERHUB.md](docker/standalone/DOCKERHUB.md) —
+publikuje ji `.github/workflows/release.yml` při vydání a
+`.github/workflows/dockerhub-description.yml` při každé změně toho souboru. Popis editovaný ve
+webovém UI Docker Hubu tedy příští běh přepíše, což je záměr.
+
+### Oddělené obrazy
 
 Kontejnery — jeden Dockerfile, tři cíle:
 

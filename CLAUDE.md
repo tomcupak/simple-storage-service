@@ -310,11 +310,38 @@ parsed and its stream drained before the handler ever saw it.
 
 # Deployment
 
-`docker/Dockerfile` has one `build` stage and three runtime targets (`api`, `s3`, `web`); the web
-image writes `config.json` from `API_URL` at container start, because a static bundle cannot bake
-the API address in. `docker-compose.prod.yml` wires it together, `deploy/*.service` are systemd
-units for a deployment without containers, and `.github/workflows/release.yml` pushes images on a
-`v*` tag.
+`docker/Dockerfile` has one `build` stage and four runtime targets (`api`, `s3`, `web`,
+`standalone`); the web image writes `config.json` from `API_URL` at container start, because a
+static bundle cannot bake the API address in. `docker-compose.prod.yml` wires the first three
+together, `deploy/*.service` are systemd units for a deployment without containers, and
+`.github/workflows/release.yml` pushes images on a `v*` tag.
+
+## The standalone image
+
+`--target standalone` is the whole product in one container - both apps, the UI, Postgres and
+Valkey - supervised by s6-overlay, whose service tree is `docker/standalone/rootfs`. It is a
+separate target rather than a separate Dockerfile so it shares the `build` stage and its cache;
+the two bundles' generated dependency lists are merged into one `node_modules` by
+`docker/standalone/merge-package-json.mjs`, which fails the build if the same package appears at
+two versions.
+
+Its shape is fixed by two decisions. Everything persistent is under one root (`STORAGE_ROOT`,
+`/data`): object payloads, the Postgres cluster and the Valkey data are only meaningful together,
+so a deployment mounts and backs up one thing. And nginx serves the UI on `WEB_PORT` (4242) while
+proxying `/api/` to the management API, so `API_PUBLIC_URL` can default to a relative path - the
+browser stays on one origin and CORS never enters the picture. The S3 endpoint listens on 443,
+the port AWS serves S3 on, which is why the node binary carries `cap_net_bind_service`.
+
+The container refuses to boot without the values that have a working default in
+`ConfigProvider` and must not keep it (`JWT_SECRET`, `CRYPTOGRAPHIC_PASSWORD`,
+`STORAGE_ENCRYPTION_KEY`, `BOOTSTRAP_ADMIN_PASSWORD`, `S3_PUBLIC_URL`) -
+`storage-env-check` reports all of them at once and exits, and `S6_BEHAVIOUR_IF_STAGE2_FAILS=2`
+turns that into a container exit. A new must-have variable is added there, not in the app.
+
+`docker/standalone/DOCKERHUB.md` is the image's Docker Hub page, published from the repository by
+`.github/workflows/release.yml` on a release and by `.github/workflows/dockerhub-description.yml`
+whenever the file changes. It is the reference for the image's environment variables - a new knob
+in the standalone image belongs in that table and in `.env.standalone.sample`.
 
 Only `apps/api` runs the migrations; `apps/s3` expects the schema and is ordered after it.
 `npm run build` builds **both** apps explicitly (`nest build api && nest build s3`) — a bare
@@ -375,6 +402,8 @@ Note: `--testPathPattern` (singular) is deprecated; use `--testPathPatterns` (pl
 
 # Ports
 
+Development, and the split deployment:
+
 | Service | Port |
 | --- | --- |
 | Postgres | 10400 |
@@ -382,3 +411,8 @@ Note: `--testPathPattern` (singular) is deprecated; use `--testPathPatterns` (pl
 | Management API | 10410 |
 | S3 API | 10411 |
 | Web UI (vite) | 10412 |
+
+The standalone container publishes different ones, because there it is the product's own address
+rather than a slot in a dev machine: the UI on **4242** and the S3 endpoint on **443** — the port
+AWS serves S3 on, so a client needs no port in its endpoint URL. The management API keeps 10410
+but is reached through nginx at `/api` on the UI's port.

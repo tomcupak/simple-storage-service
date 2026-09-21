@@ -1,0 +1,20 @@
+#!/command/with-contenv sh
+# Holds the rate-limit counters and nothing else, so it is configured as a cache rather than as a
+# store: no snapshots, and a memory ceiling it evicts under instead of growing into the host.
+exec 2>&1
+
+set -- \
+	--dir "$VALKEY_DATA_PATH" \
+	--bind 127.0.0.1 \
+	--port "$VALKEY_PORT" \
+	--save '' \
+	--appendonly "$VALKEY_APPENDONLY" \
+	--maxmemory "$VALKEY_MAXMEMORY" \
+	--maxmemory-policy "$VALKEY_MAXMEMORY_POLICY"
+
+if [ -n "${VALKEY_PASSWORD:-}" ]; then
+	set -- "$@" --requirepass "$VALKEY_PASSWORD"
+fi
+
+echo "valkey: starting on 127.0.0.1:${VALKEY_PORT}"
+exec s6-setuidgid valkey valkey-server "$@"

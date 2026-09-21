@@ -1,0 +1,33 @@
+# The Docker Hub page without a release.
+#
+# `release.yml` publishes the description alongside the image, which is right for a release but
+# wrong for a typo: a documentation fix should not need a version tag. This workflow pushes the
+# page on its own whenever the file changes on the default branch.
+#
+# Configured through one repository variable and two secrets; without them it does nothing:
+#   vars.DOCKERHUB_REPOSITORY   e.g. myorg/simple-storage-service
+#   secrets.DOCKERHUB_USERNAME
+#   secrets.DOCKERHUB_TOKEN     a Docker Hub access token with write access to that repository
+name: Docker Hub description
+
+on:
+  push:
+    branches: [mvp]
+    paths: ['docker/standalone/DOCKERHUB.md', '.github/workflows/dockerhub-description.yml']
+  workflow_dispatch:
+
+jobs:
+  description:
+    runs-on: ubuntu-latest
+    if: vars.DOCKERHUB_REPOSITORY != ''
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ vars.DOCKERHUB_REPOSITORY }}
+          short-description: 'S3-compatible object storage with a management UI, in one container'
+          readme-filepath: docker/standalone/DOCKERHUB.md
