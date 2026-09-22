@@ -73,10 +73,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Docker Hub is optional: without the two secrets and the repository variable, the image is
-      # still built and pushed to ghcr, and only the Hub steps are skipped.
+      # Docker Hub is optional: without the token the image is still built and pushed to ghcr, and
+      # only the Hub steps are skipped. `secrets` cannot be read from an `if:` expression, only
+      # from `run`/`with`, hence the detour through an output. `vars.DOCKERHUB_REPOSITORY`
+      # overrides the image name for a fork.
       - id: hub
-        run: echo "enabled=${{ vars.DOCKERHUB_REPOSITORY != '' && secrets.DOCKERHUB_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+        env:
+          REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY || 'tomcupak/storage' }}
+        run: |
+          echo "enabled=${{ secrets.DOCKERHUB_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+          echo "repository=$REPOSITORY" >> "$GITHUB_OUTPUT"
 
       - if: steps.hub.outputs.enabled == 'true'
         uses: docker/login-action@v3
@@ -89,7 +95,7 @@ jobs:
         with:
           images: |
             ${{ env.REGISTRY }}/${{ github.repository }}/standalone
-            ${{ steps.hub.outputs.enabled == 'true' && format('docker.io/{0}', vars.DOCKERHUB_REPOSITORY) || '' }}
+            ${{ steps.hub.outputs.enabled == 'true' && format('docker.io/{0}', steps.hub.outputs.repository) || '' }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -119,6 +125,6 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: ${{ vars.DOCKERHUB_REPOSITORY }}
+          repository: ${{ steps.hub.outputs.repository }}
           short-description: 'S3-compatible object storage with a management UI, in one container'
           readme-filepath: docker/standalone/DOCKERHUB.md

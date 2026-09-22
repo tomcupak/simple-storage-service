@@ -13,8 +13,6 @@ file browser. Postgres and Valkey run inside the image, so there is nothing else
 
 ## Quick start
 
-`<image>` below is this repository's image, at the tag you want.
-
 ```bash
 docker volume create storage-data
 
@@ -29,7 +27,7 @@ docker run -d --name storage \
   -e S3_PUBLIC_URL="https://s3.example.com" \
   --stop-timeout 30 \
   --restart unless-stopped \
-  <image>
+  tomcupak/storage
 ```
 
 Then open `http://localhost:4242` and sign in as `admin@storage.local` with the password you set.
@@ -45,7 +43,7 @@ image.
 ```yaml
 services:
   storage:
-    image: <image>
+    image: tomcupak/storage
     ports:
       - "4242:4242"   # management UI (and the management API under /api)
       - "443:443"     # S3 endpoint

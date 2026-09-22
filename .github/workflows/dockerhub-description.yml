@@ -4,10 +4,10 @@
 # wrong for a typo: a documentation fix should not need a version tag. This workflow pushes the
 # page on its own whenever the file changes on the default branch.
 #
-# Configured through one repository variable and two secrets; without them it does nothing:
-#   vars.DOCKERHUB_REPOSITORY   e.g. myorg/simple-storage-service
+# Configured through two secrets, and optionally a variable that overrides the image name:
 #   secrets.DOCKERHUB_USERNAME
-#   secrets.DOCKERHUB_TOKEN     a Docker Hub access token with write access to that repository
+#   secrets.DOCKERHUB_TOKEN     a Docker Hub access token with write access to the repository
+#   vars.DOCKERHUB_REPOSITORY   defaults to tomcupak/storage
 name: Docker Hub description
 
 on:
@@ -19,15 +19,24 @@ on:
 jobs:
   description:
     runs-on: ubuntu-latest
-    if: vars.DOCKERHUB_REPOSITORY != ''
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: peter-evans/dockerhub-description@v4
+      # `secrets` cannot be read from an `if:` expression, so the presence of the token becomes an
+      # output first. Without it the workflow is a no-op rather than a failure.
+      - id: hub
+        env:
+          REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY || 'tomcupak/storage' }}
+        run: |
+          echo "enabled=${{ secrets.DOCKERHUB_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+          echo "repository=$REPOSITORY" >> "$GITHUB_OUTPUT"
+
+      - if: steps.hub.outputs.enabled == 'true'
+        uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-          repository: ${{ vars.DOCKERHUB_REPOSITORY }}
+          repository: ${{ steps.hub.outputs.repository }}
           short-description: 'S3-compatible object storage with a management UI, in one container'
           readme-filepath: docker/standalone/DOCKERHUB.md
