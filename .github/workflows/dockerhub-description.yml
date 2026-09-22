@@ -4,7 +4,8 @@
 # wrong for a typo: a documentation fix should not need a version tag. This workflow pushes the
 # page on its own whenever the file changes on the default branch.
 #
-# Configured through two secrets, and optionally a variable that overrides the image name:
+# Configured through two required secrets, and optionally a variable that overrides the image
+# name; without the secrets the workflow fails rather than doing nothing:
 #   secrets.DOCKERHUB_USERNAME
 #   secrets.DOCKERHUB_TOKEN     a Docker Hub access token with write access to the repository
 #   vars.DOCKERHUB_REPOSITORY   defaults to tomcupak/storage
@@ -23,17 +24,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # `secrets` cannot be read from an `if:` expression, so the presence of the token becomes an
-      # output first. Without it the workflow is a no-op rather than a failure.
+      # `secrets` cannot be read from an `if:` expression, hence the detour through a step. A
+      # missing credential fails here rather than skipping: a documentation change that silently
+      # never reached the Hub page looks exactly like one that did.
       - id: hub
         env:
           REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY || 'tomcupak/storage' }}
+          USERNAME_SET: ${{ secrets.DOCKERHUB_USERNAME != '' }}
+          TOKEN_SET: ${{ secrets.DOCKERHUB_TOKEN != '' }}
         run: |
-          echo "enabled=${{ secrets.DOCKERHUB_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+          if [ "$USERNAME_SET" != 'true' ] || [ "$TOKEN_SET" != 'true' ]; then
+            echo "::error::DOCKERHUB_USERNAME and DOCKERHUB_TOKEN must be set as repository secrets (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
           echo "repository=$REPOSITORY" >> "$GITHUB_OUTPUT"
 
-      - if: steps.hub.outputs.enabled == 'true'
-        uses: peter-evans/dockerhub-description@v4
+      - uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}

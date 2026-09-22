@@ -73,19 +73,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Docker Hub is optional: without the token the image is still built and pushed to ghcr, and
-      # only the Hub steps are skipped. `secrets` cannot be read from an `if:` expression, only
-      # from `run`/`with`, hence the detour through an output. `vars.DOCKERHUB_REPOSITORY`
-      # overrides the image name for a fork.
+      # Docker Hub is where this image is published, so a missing credential is an error rather
+      # than a reason to quietly ship to ghcr alone - a release that silently went nowhere is
+      # worse than one that failed. `secrets` cannot be read from an `if:` expression, only from
+      # `run`/`with`, hence the detour through an output.
       - id: hub
         env:
           REPOSITORY: ${{ vars.DOCKERHUB_REPOSITORY || 'tomcupak/storage' }}
+          USERNAME_SET: ${{ secrets.DOCKERHUB_USERNAME != '' }}
+          TOKEN_SET: ${{ secrets.DOCKERHUB_TOKEN != '' }}
         run: |
-          echo "enabled=${{ secrets.DOCKERHUB_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+          if [ "$USERNAME_SET" != 'true' ] || [ "$TOKEN_SET" != 'true' ]; then
+            echo "::error::DOCKERHUB_USERNAME and DOCKERHUB_TOKEN must be set as repository secrets (Settings > Secrets and variables > Actions). Without them nothing reaches ${REPOSITORY}."
+            exit 1
+          fi
           echo "repository=$REPOSITORY" >> "$GITHUB_OUTPUT"
 
-      - if: steps.hub.outputs.enabled == 'true'
-        uses: docker/login-action@v3
+      - uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -95,7 +99,7 @@ jobs:
         with:
           images: |
             ${{ env.REGISTRY }}/${{ github.repository }}/standalone
-            ${{ steps.hub.outputs.enabled == 'true' && format('docker.io/{0}', steps.hub.outputs.repository) || '' }}
+            docker.io/${{ steps.hub.outputs.repository }}
           # A stable tag (v1.2.0) gets 1.2.0, 1.2, sha-... and latest; `latest` comes from the
           # `flavor` default (`latest=auto`), which knows to skip a prerelease. A prerelease tag
           # (v1.2.0-beta.1) gets only 1.2.0-beta.1 and sha-...: semver patterns collapse to the
@@ -125,11 +129,22 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Says where the release actually went, on the run's own summary page - the question a
+      # finished job otherwise leaves open.
+      - env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          {
+            echo '### Published'
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # The Docker Hub page is documentation like any other, so it lives in the repository and is
       # published from it - a description edited in the web UI would be overwritten by the next
       # release, which is the point.
-      - if: steps.hub.outputs.enabled == 'true'
-        uses: peter-evans/dockerhub-description@v4
+      - uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
