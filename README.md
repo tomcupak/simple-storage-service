@@ -117,9 +117,9 @@ a macOS (virtiofs, gRPC-FUSE, 9p) ani NFS/SMB ne. Kontejner při startu vypíše
 leží, a u pomalých případů varuje.
 
 Dokumentace pro Docker Hub je [docker/standalone/DOCKERHUB.md](docker/standalone/DOCKERHUB.md) —
-publikuje ji `.github/workflows/release.yml` při vydání a
-`.github/workflows/dockerhub-description.yml` při každé změně toho souboru. Popis editovaný ve
-webovém UI Docker Hubu tedy příští běh přepíše, což je záměr.
+publikuje ji `.github/workflows/release.yml` spolu s obrazem, který popisuje. Popis editovaný ve
+webovém UI Docker Hubu tedy příští release přepíše, což je záměr. Token k tomu potřebuje scope
+**read/write/delete**; s read/write vrátí Docker Hub na aktualizaci popisu 403.
 
 ### Oddělené obrazy
 

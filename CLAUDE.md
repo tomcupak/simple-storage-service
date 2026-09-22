@@ -338,10 +338,15 @@ The container refuses to boot without the values that have a working default in
 `storage-env-check` reports all of them at once and exits, and `S6_BEHAVIOUR_IF_STAGE2_FAILS=2`
 turns that into a container exit. A new must-have variable is added there, not in the app.
 
-`docker/standalone/DOCKERHUB.md` is the image's Docker Hub page, published from the repository by
-`.github/workflows/release.yml` on a release and by `.github/workflows/dockerhub-description.yml`
-whenever the file changes. It is the reference for the image's environment variables - a new knob
-in the standalone image belongs in that table and in `.env.standalone.sample`.
+`docker/standalone/DOCKERHUB.md` is the image's Docker Hub page, published by
+`.github/workflows/release.yml` alongside the image it describes. It is the reference for the
+image's environment variables - a new knob in the standalone image belongs in that table and in
+`.env.standalone.sample`.
+
+The release needs `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` as repository secrets, and the token
+needs read/write/**delete** scope: the description is a PATCH on the repository itself, which a
+read/write token is refused with 403. Missing secrets fail the job rather than skipping the push -
+a release that silently went nowhere is worse than one that failed.
 
 Only `apps/api` runs the migrations; `apps/s3` expects the schema and is ordered after it.
 `npm run build` builds **both** apps explicitly (`nest build api && nest build s3`) — a bare

@@ -5,7 +5,13 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # A manual run has to name the tag. `metadata-action` derives the version from the ref, and a
+  # branch ref carries none - which is how a re-run once published an image tagged only `sha-...`.
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Git tag to publish, e.g. v1.0.0-beta.1'
+        required: true
 
 env:
   REGISTRY: ghcr.io
@@ -22,7 +28,10 @@ jobs:
         target: [api, s3, web]
 
     steps:
+      # Empty on a tag push, where checkout already defaults to the triggering ref.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -32,13 +41,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # `value=` states the version instead of letting the action read it off the ref, so a manual
+      # run produces the same tags as the push that would have released it.
       - id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository }}/${{ matrix.target }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ inputs.tag || github.ref_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag || github.ref_name }}
             type=sha
 
       - uses: docker/build-push-action@v6
@@ -64,6 +75,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -109,10 +122,10 @@ jobs:
           # wants to follow them without reading the tag list. `is_default_branch` is deliberately
           # not used anywhere here: it is false on a tag push, so a rule guarded by it never fires.
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ inputs.tag || github.ref_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag || github.ref_name }}
             type=sha
-            type=raw,value=beta,enable=${{ startsWith(github.ref, 'refs/tags/') && contains(github.ref, '-beta') }}
+            type=raw,value=beta,enable=${{ contains(inputs.tag || github.ref_name, '-beta') }}
 
       - uses: docker/build-push-action@v6
         with:
@@ -142,8 +155,11 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       # The Docker Hub page is documentation like any other, so it lives in the repository and is
-      # published from it - a description edited in the web UI would be overwritten by the next
-      # release, which is the point.
+      # published from it with the image it describes - a description edited in the web UI is
+      # overwritten by the next release, which is the point.
+      #
+      # This needs a token with read/write/**delete** scope: the description is a PATCH on the
+      # repository itself, and a read/write token answers it with 403 Forbidden.
       - uses: peter-evans/dockerhub-description@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
