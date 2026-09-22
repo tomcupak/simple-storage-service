@@ -293,6 +293,18 @@ torn snapshot unless your filesystem can do an atomic one. For a hot backup, `pg
 database and copy `/data/objects` separately — in that order, so the dump can only be older than
 the blobs it names, never newer.
 
+### Tags
+
+| Tag | |
+| --- | --- |
+| `latest` | the newest stable release |
+| `1.2.0`, `1.2` | a release, and the newest patch of that minor |
+| `beta` | the newest prerelease. Never the same image as `latest` |
+| `1.2.0-beta.1` | one specific prerelease |
+| `sha-abc1234` | one specific commit |
+
+A prerelease never moves `latest`, `1.2` or `1`, so following `latest` will not pull a beta.
+
 ### Upgrading
 
 Pull the new tag and recreate the container against the same volume. The management API runs the

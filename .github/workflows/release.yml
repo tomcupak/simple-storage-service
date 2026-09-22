@@ -96,11 +96,19 @@ jobs:
           images: |
             ${{ env.REGISTRY }}/${{ github.repository }}/standalone
             ${{ steps.hub.outputs.enabled == 'true' && format('docker.io/{0}', steps.hub.outputs.repository) || '' }}
+          # A stable tag (v1.2.0) gets 1.2.0, 1.2, sha-... and latest; `latest` comes from the
+          # `flavor` default (`latest=auto`), which knows to skip a prerelease. A prerelease tag
+          # (v1.2.0-beta.1) gets only 1.2.0-beta.1 and sha-...: semver patterns collapse to the
+          # full version for a prerelease, so a beta can never move 1.2 or latest.
+          #
+          # `beta` on top of that is a channel pointer - "the newest prerelease" - for someone who
+          # wants to follow them without reading the tag list. `is_default_branch` is deliberately
+          # not used anywhere here: it is false on a tag push, so a rule guarded by it never fires.
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=beta,enable=${{ startsWith(github.ref, 'refs/tags/') && contains(github.ref, '-beta') }}
 
       - uses: docker/build-push-action@v6
         with:
