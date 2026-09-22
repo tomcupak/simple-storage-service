@@ -1,0 +1,37 @@
+#!/bin/sh
+# Waits for the cluster to accept connections, then makes sure the application database exists
+# and the superuser password matches what the applications were handed.
+#
+# Both steps run on every boot on purpose: the database is created only once, but the password is
+# reapplied so that changing POSTGRES_PASSWORD in the compose file actually changes it, instead of
+# leaving the applications unable to log in to their own database.
+set -eu
+
+psql_local="psql --host=/run/postgresql --port=${POSTGRES_PORT} --username=${POSTGRES_USER} --no-password --dbname=postgres"
+
+echo 'postgres: waiting for the cluster'
+waited=0
+until s6-setuidgid postgres pg_isready --host=/run/postgresql --port="$POSTGRES_PORT" --quiet; do
+	waited=$((waited + 1))
+	if [ "$waited" -ge "${POSTGRES_START_TIMEOUT:-60}" ]; then
+		echo "postgres: cluster did not accept connections within ${POSTGRES_START_TIMEOUT:-60}s" >&2
+		exit 1
+	fi
+	sleep 1
+done
+
+exists=$(s6-setuidgid postgres $psql_local --tuples-only --no-align \
+	--command="SELECT 1 FROM pg_database WHERE datname = '${POSTGRES_DB}'")
+
+if [ "$exists" != '1' ]; then
+	echo "postgres: creating database ${POSTGRES_DB}"
+	s6-setuidgid postgres $psql_local --command="CREATE DATABASE \"${POSTGRES_DB}\" TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'"
+fi
+
+# `:'password'` lets psql do the quoting - a generated password is base64 and a supplied one can
+# be anything at all.
+s6-setuidgid postgres $psql_local --quiet \
+	--set=password="$POSTGRES_PASSWORD" \
+	--command="ALTER ROLE \"${POSTGRES_USER}\" WITH PASSWORD :'password'" > /dev/null
+
+echo "postgres: database ${POSTGRES_DB} ready"

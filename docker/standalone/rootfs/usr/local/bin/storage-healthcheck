@@ -1,0 +1,16 @@
+#!/bin/sh
+# One probe per published surface. The S3 endpoint's own readiness check is the interesting one -
+# it verifies the database and that the data directory is writable, which is what a full or
+# read-only volume looks like from the outside.
+set -eu
+
+probe() {
+	wget --quiet --spider --timeout=3 "$2" 2>/dev/null || {
+		echo "unhealthy: $1" >&2
+		exit 1
+	}
+}
+
+probe 'web UI' "http://127.0.0.1:${WEB_PORT}/config.json"
+probe 'management API' "http://127.0.0.1:${API_PORT}/"
+probe 'S3 endpoint' "http://127.0.0.1:${S3_PORT}/_ready"

@@ -167,7 +167,14 @@ COPY --from=build /build/web/dist/storage /usr/share/nginx/html
 # The supervision tree and the scripts it runs. `chmod` is explicit because a checkout on a
 # filesystem without a permission bit would otherwise produce an image whose services cannot run.
 COPY docker/standalone/rootfs /
-RUN chmod +x /usr/local/bin/storage-* /etc/s6-overlay/s6-rc.d/*/run
+# The rootfs mirrors the container's filesystem, so it contains a `bin` directory - which a
+# Visual-Studio-flavoured `.gitignore` excludes as `[Bb]in/`, and which once left every boot
+# script out of the repository. Say that, instead of failing on a glob that matched nothing.
+RUN if [ ! -f /usr/local/bin/storage-env-check ]; then \
+		echo 'standalone: docker/standalone/rootfs is incomplete in the build context - check .gitignore and .dockerignore' >&2; \
+		exit 1; \
+	fi \
+	&& chmod +x /usr/local/bin/storage-* /etc/s6-overlay/s6-rc.d/*/run
 
 # The S3 endpoint listens on 443, the port AWS serves S3 on, and 443 is privileged. The capability
 # sits on the binary rather than on the container so the applications still run as `storage`:

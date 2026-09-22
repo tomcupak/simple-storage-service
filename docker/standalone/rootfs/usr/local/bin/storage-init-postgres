@@ -1,0 +1,38 @@
+#!/bin/sh
+# Creates the Postgres cluster on first boot and settles on a superuser password.
+#
+# An embedded database is still reachable from anything sharing the container's network namespace
+# (`--network host` makes that the whole machine), so the cluster is not left on trust
+# authentication. When the operator does not supply a password one is generated once and kept
+# beside the cluster it belongs to - the point is that no image ever ships with a known one.
+set -eu
+
+if [ ! -s "${PGDATA}/PG_VERSION" ]; then
+	echo "postgres: initialising a new cluster in ${PGDATA}"
+	# C collation cluster-wide: the S3 key order is raw UTF-8 bytes, which is what the queries
+	# ask for explicitly anyway - this only removes the chance of a locale creeping in elsewhere.
+	s6-setuidgid postgres initdb \
+		--pgdata="$PGDATA" \
+		--username="$POSTGRES_USER" \
+		--encoding=UTF8 \
+		--locale=C \
+		--auth-local=trust \
+		--auth-host=scram-sha-256
+else
+	echo "postgres: reusing the cluster in ${PGDATA}"
+fi
+
+password_file="${STORAGE_ROOT}/.postgres-password"
+
+if [ -z "${POSTGRES_PASSWORD:-}" ]; then
+	if [ ! -s "$password_file" ]; then
+		echo "postgres: no POSTGRES_PASSWORD given, generating one into ${password_file}"
+		head -c 32 /dev/urandom | base64 | tr -d '\n=+/' > "$password_file"
+		chmod 600 "$password_file"
+	fi
+	POSTGRES_PASSWORD=$(cat "$password_file")
+fi
+
+# Handed to the services that come after this one - `with-contenv` reads this directory, so both
+# applications and the database bootstrap see the same value whether it was given or generated.
+printf '%s' "$POSTGRES_PASSWORD" > /run/s6/container_environment/POSTGRES_PASSWORD

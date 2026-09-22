@@ -404,3 +404,8 @@ dist-deploy
 .serverless/**/*.zip
 data/
 .claude/settings.local.json
+
+# The standalone image's rootfs mirrors the container's filesystem, so it contains a `bin`
+# directory - which the Visual Studio block above excludes as `[Bb]in/`. Without this exception
+# the boot scripts are silently left out of the repository and the image build fails on them.
+!docker/standalone/rootfs/usr/local/bin/
