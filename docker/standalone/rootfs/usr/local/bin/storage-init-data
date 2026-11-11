@@ -1,0 +1,58 @@
+#!/bin/sh
+# Prepares the one directory everything in the container persists into, and says out loud what
+# kind of filesystem it landed on.
+#
+# All three stores share `$STORAGE_ROOT` so a deployment has exactly one thing to mount and one
+# thing to back up: object payloads, the Postgres cluster and the Valkey dump are useless without
+# each other - a bucket listing pointing at blobs that are not there is not a recoverable state.
+set -eu
+
+echo "storage: preparing ${STORAGE_ROOT}"
+
+mkdir -p "$STORAGE_DATA_PATH" "$PGDATA" "$VALKEY_DATA_PATH" /run/postgresql
+# Deliberately not recursive: the blob store can hold millions of files and walking it on every
+# boot would cost more than the container's whole startup. Only the roots are claimed.
+chown storage:storage "$STORAGE_DATA_PATH"
+chown postgres:postgres "$PGDATA" /run/postgresql
+chown valkey:valkey "$VALKEY_DATA_PATH"
+# Postgres refuses to start on a cluster directory anyone else can read.
+chmod 700 "$PGDATA"
+
+if ! s6-setuidgid storage test -w "$STORAGE_DATA_PATH"; then
+	echo "storage: ${STORAGE_DATA_PATH} is not writable by the storage user" >&2
+	exit 1
+fi
+
+# The filesystem under the volume decides what this container is worth, so it is reported rather
+# than assumed. Postgres and the blob store are both write-heavy and both depend on the kernel
+# honouring fsync, locks and atomic rename the way a local filesystem does; a shared-folder driver
+# is a different set of promises, and neither of them can tell the difference until it matters.
+fstype=$(stat -f -c %T "$STORAGE_ROOT" 2>/dev/null || echo unknown)
+echo "storage: ${STORAGE_ROOT} is on ${fstype}"
+
+# The image declares /data as a volume, so Docker mounts one even when nobody asked. An
+# orchestrator that ignores that declaration - Kubernetes does - leaves this directory in the
+# container's own writable layer, which is the one case where the data is already lost.
+if ! grep -q " ${STORAGE_ROOT} " /proc/self/mounts; then
+	cat >&2 <<WARN
+storage: WARNING - nothing is mounted at ${STORAGE_ROOT}.
+         Objects and the database are being written into the container's writable layer, and go
+         away with the container. Mount a volume:
+             docker run -v storage-data:${STORAGE_ROOT} ...
+WARN
+fi
+
+case "$fstype" in
+	tmpfs | ramfs)
+		echo "storage: WARNING - ${STORAGE_ROOT} is in memory; nothing written here survives a restart." >&2
+		;;
+	9p | v9fs | virtiofs | fuseblk | fuse* | cifs | smb* | nfs | nfs4 | msdos | vfat | exfat | ntfs)
+		cat >&2 <<WARN
+storage: WARNING - ${STORAGE_ROOT} is on ${fstype}, a shared or network filesystem.
+         Expect a fraction of the disk's throughput, and expect Postgres to be running on
+         durability guarantees it cannot verify. Use a native Linux filesystem (ext4, xfs, zfs):
+         a named Docker volume on a Linux host is one, a bind mount from a Windows or macOS host
+         is not.
+WARN
+		;;
+esac

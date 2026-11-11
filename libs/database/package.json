@@ -1,0 +1,11 @@
+{
+	"name": "@storage/database",
+	"version": "1.0.0",
+	"main": "src",
+	"files": [
+		"*.mjs",
+		"*.md"
+	],
+	"peerDependencies": {
+	}
+}

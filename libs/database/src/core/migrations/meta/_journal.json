@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1789669883774,
+      "tag": "0000_init",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1789671869662,
+      "tag": "0001_add_bucket_cors_and_multipart_headers",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1789756913398,
+      "tag": "0002_add_quotas_user_status_and_audit_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1789903432341,
+      "tag": "0003_add_object_encryption",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794383983398,
+      "tag": "0004_add_migration_jobs",
+      "breakpoints": true
+    }
+  ]
+}

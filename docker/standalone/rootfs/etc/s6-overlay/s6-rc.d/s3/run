@@ -1,0 +1,9 @@
+#!/command/with-contenv sh
+# The S3-compatible endpoint. It listens on the port AWS serves S3 on by default, which is below
+# 1024 - the node binary carries cap_net_bind_service so this still runs as an unprivileged user.
+exec 2>&1
+
+cd /app || exit 1
+
+echo "s3: starting on port ${S3_PORT}"
+exec s6-setuidgid storage node --enable-source-maps /app/s3/main.js

@@ -1,0 +1,36 @@
+# The whole product as one container: both applications, the UI, Postgres and Valkey.
+#
+#   cp .env.standalone.sample .env.standalone   # then fill in the five required secrets
+#   docker compose -f docker-compose.standalone.yml up -d --build
+#
+# For a deployment that needs the pieces apart - an external database, more than one instance of
+# the S3 endpoint - use `docker-compose.prod.yml` instead. It runs the same code.
+
+services:
+  storage:
+    image: ${STORAGE_IMAGE:-storage:latest}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: standalone
+    env_file: .env.standalone
+    # The right-hand side is the port inside the container and matches the image's defaults.
+    # Compose interpolates the left-hand side from the shell or from `.env` - never from
+    # `env_file` - so remap here rather than moving the listener with WEB_PORT / S3_PORT, or the
+    # two sides stop agreeing.
+    ports:
+      # Management UI, and the management API under /api on the same origin.
+      - "${WEB_PUBLISH_PORT:-4242}:4242"
+      # The S3 endpoint, on the port AWS serves S3 on. Publish it elsewhere if something on this
+      # host already owns 443 - S3_PUBLIC_URL has to name whatever clients end up using.
+      - "${S3_PUBLISH_PORT:-443}:443"
+    volumes:
+      # Object payloads, the Postgres cluster and the Valkey data, all under one root. A named
+      # volume on a Linux host is a native filesystem; a bind mount from Windows or macOS is not.
+      - storage-data:/data
+    restart: unless-stopped
+    # Postgres shuts down fast, but not instantly, and the default 10s can cut a checkpoint short.
+    stop_grace_period: 30s
+
+volumes:
+  storage-data:

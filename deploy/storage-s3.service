@@ -1,0 +1,41 @@
+# S3-compatible endpoint, for a deployment without containers.
+#
+# Install:
+#   install -d /opt/storage/s3
+#   cp -r dist/apps/s3/* /opt/storage/s3/
+#   (cd /opt/storage/s3 && npm install --omit=dev)
+#   cp deploy/storage-s3.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now storage-s3
+#
+# Ordered after `storage-api`, which owns the migrations: this app expects the schema to be
+# there and never creates it.
+
+[Unit]
+Description=Storage S3-compatible API
+After=network-online.target postgresql.service storage-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=storage
+Group=storage
+WorkingDirectory=/opt/storage/s3
+EnvironmentFile=/etc/storage/storage.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node --enable-source-maps /opt/storage/s3/main.js
+Restart=on-failure
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# Both apps read and write the same blobs - the S3 endpoint is not a read-only replica.
+ReadWritePaths=/var/lib/storage
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

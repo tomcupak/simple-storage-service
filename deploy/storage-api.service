@@ -1,0 +1,44 @@
+# Management API, for a deployment without containers.
+#
+# Install:
+#   install -d /opt/storage/api /etc/storage
+#   cp -r dist/apps/api/* /opt/storage/api/
+#   cp -r libs/database/src/core/migrations /opt/storage/api/migrations
+#   (cd /opt/storage/api && npm install --omit=dev)
+#   cp .env.sample /etc/storage/storage.env   # then edit it
+#   cp deploy/storage-api.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now storage-api
+#
+# This unit owns the database schema: it runs the migrations on start, and `storage-s3` is
+# ordered after it so the two never migrate at the same time.
+
+[Unit]
+Description=Storage management API
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=storage
+Group=storage
+WorkingDirectory=/opt/storage/api
+EnvironmentFile=/etc/storage/storage.env
+Environment=NODE_ENV=production
+Environment=MIGRATIONS_CORE_PATH=/opt/storage/api/migrations
+ExecStart=/usr/bin/node --enable-source-maps /opt/storage/api/main.js
+Restart=on-failure
+RestartSec=5
+
+# The process needs its data directory and nothing else of the filesystem.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/storage
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

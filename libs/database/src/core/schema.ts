@@ -1,0 +1,290 @@
+import { sql } from 'drizzle-orm'
+import {
+	bigint,
+	boolean,
+	index,
+	integer,
+	jsonb,
+	pgEnum,
+	pgTable,
+	primaryKey,
+	timestamp,
+	uniqueIndex,
+	uuid,
+	varchar,
+} from 'drizzle-orm/pg-core'
+
+import { AccessKeyStatus, AuditAction, AuditResult, BucketAcl, BucketPermission, BucketVersioning, MigrationBucketMode, MigrationBucketStatus, MigrationJobStatus, MultipartUploadStatus, ServerSideEncryption, StorageClass, UserRole, UserStatus } from './types'
+
+export const userRoleType = pgEnum('user_role_type', UserRole)
+export const userStatusType = pgEnum('user_status_type', UserStatus)
+export const bucketPermissionType = pgEnum('bucket_permission_type', BucketPermission)
+export const accessKeyStatusType = pgEnum('access_key_status_type', AccessKeyStatus)
+export const bucketAclType = pgEnum('bucket_acl_type', BucketAcl)
+export const bucketVersioningType = pgEnum('bucket_versioning_type', BucketVersioning)
+export const storageClassType = pgEnum('storage_class_type', StorageClass)
+export const multipartUploadStatusType = pgEnum('multipart_upload_status_type', MultipartUploadStatus)
+export const serverSideEncryptionType = pgEnum('server_side_encryption_type', ServerSideEncryption)
+export const auditActionType = pgEnum('audit_action_type', AuditAction)
+export const auditResultType = pgEnum('audit_result_type', AuditResult)
+export const migrationJobStatusType = pgEnum('migration_job_status_type', MigrationJobStatus)
+export const migrationBucketStatusType = pgEnum('migration_bucket_status_type', MigrationBucketStatus)
+export const migrationBucketModeType = pgEnum('migration_bucket_mode_type', MigrationBucketMode)
+
+const createdAt = timestamp('created_at', { withTimezone: true }).notNull().defaultNow()
+const updatedAt = timestamp('updated_at', { withTimezone: true })
+const deletedAt = timestamp('deleted_at', { withTimezone: true })
+
+export const user = pgTable('user', {
+	guid: uuid('guid').primaryKey().defaultRandom(),
+	email: varchar('email').notNull(),
+	name: varchar('name'),
+	passwordHash: varchar('password_hash').notNull(),
+	role: userRoleType('role').notNull().default(UserRole.user),
+	status: userStatusType('status').notNull().default(UserStatus.active),
+	/** Maximum bytes this user's buckets may hold together; null means no limit. */
+	quotaBytes: bigint('quota_bytes', { mode: 'number' }),
+	lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+	createdAt,
+	updatedAt,
+	deletedAt,
+}, (t) => [
+	uniqueIndex('unique_user_email').on(t.email),
+])
+
+/** Refresh-token sessions for the management UI. Only the token hash is stored. */
+export const userSession = pgTable('user_session', {
+	guid: uuid('guid').primaryKey().defaultRandom(),
+	userGuid: uuid('user_guid').references(() => user.guid).notNull(),
+	refreshTokenHash: varchar('refresh_token_hash').notNull(),
+	userAgent: varchar('user_agent'),
+	expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+	revokedAt: timestamp('revoked_at', { withTimezone: true }),
+	createdAt,
+}, (t) => [
+	uniqueIndex('unique_user_session_token').on(t.refreshTokenHash),
+	index('idx_user_session_user').on(t.userGuid),
+])
+
+/** S3 credentials (SigV4). The secret is stored encrypted, never in plain text. */
+export const accessKey = pgTable('access_key', {
+	accessKeyId: varchar('access_key_id').primaryKey(),
+	userGuid: uuid('user_guid').references(() => user.guid).notNull(),
+	secretKeyEncrypted: varchar('secret_key_encrypted').notNull(),
+	description: varchar('description'),
+	status: accessKeyStatusType('status').notNull().default(AccessKeyStatus.active),
+	expiresAt: timestamp('expires_at', { withTimezone: true }),
+	lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+	createdAt,
+	deletedAt,
+}, (t) => [
+	index('idx_access_key_user').on(t.userGuid),
+])
+
+export const bucket = pgTable('bucket', {
+	guid: uuid('guid').primaryKey().defaultRandom(),
+	/** S3 bucket name - globally unique within this deployment, DNS-compatible. */
+	name: varchar('name').notNull(),
+	ownerUserGuid: uuid('owner_user_guid').references(() => user.guid).notNull(),
+	region: varchar('region').notNull().default('us-east-1'),
+	acl: bucketAclType('acl').notNull().default(BucketAcl.private),
+	versioning: bucketVersioningType('versioning').notNull().default(BucketVersioning.disabled),
+	/** Maximum bytes this bucket may hold; null means no limit. */
+	quotaBytes: bigint('quota_bytes', { mode: 'number' }),
+	/** `CORSConfiguration` rules set through `PutBucketCors`; null means no CORS is configured. */
+	cors: jsonb('cors'),
+	createdAt,
+	updatedAt,
+	deletedAt,
+}, (t) => [
+	uniqueIndex('unique_bucket_name').on(t.name),
+	index('idx_bucket_owner').on(t.ownerUserGuid),
+])
+
+/** AWS-shaped bucket policy document (Version/Statement). Evaluated by the policy engine
+ *  on every S3 request; one row per bucket. */
+export const bucketPolicy = pgTable('bucket_policy', {
+	bucketGuid: uuid('bucket_guid').references(() => bucket.guid).primaryKey(),
+	document: jsonb('document').notNull(),
+	updatedByUserGuid: uuid('updated_by_user_guid').references(() => user.guid),
+	createdAt,
+	updatedAt,
+})
+
+/** Management-level grants: which UI user may do what with a bucket. */
+export const bucketAccess = pgTable('bucket_access', {
+	bucketGuid: uuid('bucket_guid').references(() => bucket.guid).notNull(),
+	userGuid: uuid('user_guid').references(() => user.guid).notNull(),
+	permissions: bucketPermissionType('permissions').array().notNull().default(sql`'{}'::bucket_permission_type[]`),
+	createdAt,
+}, (t) => [
+	primaryKey({ columns: [t.bucketGuid, t.userGuid] }),
+])
+
+/** One row per (bucket, key) - points at the newest version. Version rows hold the data. */
+export const object = pgTable('object', {
+	guid: uuid('guid').primaryKey().defaultRandom(),
+	bucketGuid: uuid('bucket_guid').references(() => bucket.guid).notNull(),
+	key: varchar('key').notNull(),
+	latestVersionGuid: uuid('latest_version_guid'),
+	createdAt,
+	updatedAt,
+}, (t) => [
+	uniqueIndex('unique_object_bucket_key').on(t.bucketGuid, t.key),
+	index('idx_object_bucket_key_prefix').on(t.bucketGuid, t.key),
+])
+
+export const objectVersion = pgTable('object_version', {
+	guid: uuid('guid').primaryKey().defaultRandom(),
+	objectGuid: uuid('object_guid').references(() => object.guid).notNull(),
+	/** S3 version id handed out to clients ('null' for unversioned buckets). */
+	versionId: varchar('version_id').notNull(),
+	/** A delete marker carries no data - it only hides older versions. */
+	isDeleteMarker: boolean('is_delete_marker').notNull().default(false),
+	size: bigint('size', { mode: 'number' }).notNull().default(0),
+	etag: varchar('etag').notNull(),
+	contentType: varchar('content_type'),
+	contentEncoding: varchar('content_encoding'),
+	cacheControl: varchar('cache_control'),
+	contentDisposition: varchar('content_disposition'),
+	storageClass: storageClassType('storage_class').notNull().default(StorageClass.standard),
+	/** Path of the blob on disk, relative to `STORAGE_DATA_PATH`. */
+	storagePath: varchar('storage_path'),
+	/** How the blob is encrypted at rest - recorded per version, so turning encryption on or
+	 *  off never makes what is already stored unreadable. */
+	encryption: serverSideEncryptionType('encryption').notNull().default(ServerSideEncryption.none),
+	/** The version's data key, wrapped with the deployment master key. Null when unencrypted. */
+	encryptionKey: varchar('encryption_key'),
+	/** `x-amz-meta-*` user metadata. */
+	metadata: jsonb('metadata'),
+	createdByAccessKeyId: varchar('created_by_access_key_id'),
+	createdAt,
+	deletedAt,
+}, (t) => [
+	uniqueIndex('unique_object_version').on(t.objectGuid, t.versionId),
+	index('idx_object_version_object').on(t.objectGuid),
+])
+
+export const multipartUpload = pgTable('multipart_upload', {
+	guid: uuid('guid').primaryKey().defaultRandom(),
+	/** S3 uploadId handed out to clients. */
+	uploadId: varchar('upload_id').notNull(),
+	bucketGuid: uuid('bucket_guid').references(() => bucket.guid).notNull(),
+	key: varchar('key').notNull(),
+	status: multipartUploadStatusType('status').notNull().default(MultipartUploadStatus.inProgress),
+	contentType: varchar('content_type'),
+	contentEncoding: varchar('content_encoding'),
+	cacheControl: varchar('cache_control'),
+	contentDisposition: varchar('content_disposition'),
+	storageClass: storageClassType('storage_class').notNull().default(StorageClass.standard),
+	metadata: jsonb('metadata'),
+	initiatedByAccessKeyId: varchar('initiated_by_access_key_id'),
+	createdAt,
+	updatedAt,
+}, (t) => [
+	uniqueIndex('unique_multipart_upload_id').on(t.uploadId),
+	index('idx_multipart_upload_bucket_key').on(t.bucketGuid, t.key),
+])
+
+export const multipartPart = pgTable('multipart_part', {
+	uploadGuid: uuid('upload_guid').references(() => multipartUpload.guid).notNull(),
+	partNumber: integer('part_number').notNull(),
+	size: bigint('size', { mode: 'number' }).notNull(),
+	etag: varchar('etag').notNull(),
+	storagePath: varchar('storage_path').notNull(),
+	encryption: serverSideEncryptionType('encryption').notNull().default(ServerSideEncryption.none),
+	encryptionKey: varchar('encryption_key'),
+	createdAt,
+}, (t) => [
+	primaryKey({ columns: [t.uploadGuid, t.partNumber] }),
+])
+
+/** Append-only record of who changed what through the management API. Written outside the
+ *  audited operation's transaction, so a failed write never rolls the operation back. */
+export const auditLog = pgTable('audit_log', {
+	guid: uuid('guid').primaryKey().defaultRandom(),
+	action: auditActionType('action').notNull(),
+	result: auditResultType('result').notNull().default(AuditResult.success),
+	/** Null for an operation attempted without a resolvable identity (a failed login). */
+	userGuid: uuid('user_guid').references(() => user.guid),
+	/** Email as it was at the time - the user row may later be renamed or deleted. */
+	userEmail: varchar('user_email'),
+	bucketName: varchar('bucket_name'),
+	objectKey: varchar('object_key'),
+	targetGuid: uuid('target_guid'),
+	sourceIp: varchar('source_ip'),
+	userAgent: varchar('user_agent'),
+	/** Operation-specific payload (new role, permissions granted, byte counts, ...). */
+	detail: jsonb('detail'),
+	createdAt,
+}, (t) => [
+	index('idx_audit_log_created_at').on(t.createdAt),
+	index('idx_audit_log_user').on(t.userGuid),
+	index('idx_audit_log_bucket').on(t.bucketName),
+])
+
+/** A migration of buckets and objects from another S3-compatible server (MinIO). Runs in the
+ *  background of `apps/api`; `heartbeat_at` is how another process tells a running job from
+ *  one whose process died. */
+export const migrationJob = pgTable('migration_job', {
+	guid: uuid('guid').primaryKey().defaultRandom(),
+	status: migrationJobStatusType('status').notNull().default(MigrationJobStatus.queued),
+	/** `http(s)://host:port` of the source server. */
+	sourceEndpoint: varchar('source_endpoint').notNull(),
+	sourceRegion: varchar('source_region').notNull(),
+	sourceAccessKeyId: varchar('source_access_key_id').notNull(),
+	/** Encrypted with `CryptographicService`; never returned by the API. */
+	sourceSecret: varchar('source_secret').notNull(),
+	createdByUserGuid: uuid('created_by_user_guid').references(() => user.guid).notNull(),
+	heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
+	error: varchar('error'),
+	startedAt: timestamp('started_at', { withTimezone: true }),
+	finishedAt: timestamp('finished_at', { withTimezone: true }),
+	createdAt,
+	updatedAt,
+}, (t) => [
+	index('idx_migration_job_status').on(t.status),
+])
+
+/** One source bucket of a job, with its progress. */
+export const migrationJobBucket = pgTable('migration_job_bucket', {
+	guid: uuid('guid').primaryKey().defaultRandom(),
+	jobGuid: uuid('job_guid').references(() => migrationJob.guid).notNull(),
+	sourceName: varchar('source_name').notNull(),
+	/** Null until the bucket exists locally (always set up front in merge mode). */
+	targetBucketGuid: uuid('target_bucket_guid').references(() => bucket.guid),
+	mode: migrationBucketModeType('mode').notNull(),
+	/** In merge mode: whether keys already present locally with different content are overwritten. */
+	overwrite: boolean('overwrite').notNull().default(false),
+	status: migrationBucketStatusType('status').notNull().default(MigrationBucketStatus.pending),
+	objectsTotal: bigint('objects_total', { mode: 'number' }).notNull().default(0),
+	objectsDone: bigint('objects_done', { mode: 'number' }).notNull().default(0),
+	objectsFailed: bigint('objects_failed', { mode: 'number' }).notNull().default(0),
+	objectsSkipped: bigint('objects_skipped', { mode: 'number' }).notNull().default(0),
+	bytesTotal: bigint('bytes_total', { mode: 'number' }).notNull().default(0),
+	bytesDone: bigint('bytes_done', { mode: 'number' }).notNull().default(0),
+	/** Whether `objects_total`/`bytes_total` have been counted yet. */
+	totalsComputed: boolean('totals_computed').notNull().default(false),
+	/** ListObjectsV2 token of the next page to copy - where a resumed job picks up. */
+	continuationToken: varchar('continuation_token'),
+	policyMigrated: boolean('policy_migrated').notNull().default(false),
+	policyWarnings: jsonb('policy_warnings').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
+	error: varchar('error'),
+	createdAt,
+	updatedAt,
+}, (t) => [
+	uniqueIndex('unique_migration_job_bucket').on(t.jobGuid, t.sourceName),
+])
+
+/** A single object that could not be copied. Capped per job by the worker. */
+export const migrationJobError = pgTable('migration_job_error', {
+	guid: uuid('guid').primaryKey().defaultRandom(),
+	jobGuid: uuid('job_guid').references(() => migrationJob.guid).notNull(),
+	bucketGuid: uuid('bucket_guid').references(() => migrationJobBucket.guid).notNull(),
+	key: varchar('key').notNull(),
+	code: varchar('code').notNull(),
+	message: varchar('message').notNull(),
+	createdAt,
+}, (t) => [
+	index('idx_migration_job_error_job').on(t.jobGuid),
+])

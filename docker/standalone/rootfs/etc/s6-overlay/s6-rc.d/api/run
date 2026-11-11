@@ -1,0 +1,9 @@
+#!/command/with-contenv sh
+# The management API. It owns the schema: the migrations run here, before the port opens, which
+# is what `init-api` waits for before the S3 endpoint is allowed to start.
+exec 2>&1
+
+cd /app || exit 1
+
+echo "api: starting on port ${API_PORT}"
+exec s6-setuidgid storage node --enable-source-maps /app/api/main.js

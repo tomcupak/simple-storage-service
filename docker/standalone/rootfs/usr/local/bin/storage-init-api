@@ -1,0 +1,21 @@
+#!/bin/sh
+# Holds the S3 endpoint back until the management API answers.
+#
+# The management API owns the schema: it runs the migrations before it starts listening, and the
+# S3 app expects to find the tables already there. Two migrators racing on boot is the failure
+# this ordering exists to prevent, and "the API is listening" is the only signal that says the
+# migrations are done.
+set -eu
+
+echo 'api: waiting for the management API to finish migrating'
+waited=0
+until wget --quiet --spider --timeout=2 "http://127.0.0.1:${API_PORT}/" 2>/dev/null; do
+	waited=$((waited + 1))
+	if [ "$waited" -ge "${API_START_TIMEOUT:-120}" ]; then
+		echo "api: did not answer within ${API_START_TIMEOUT:-120}s - see the log above for why" >&2
+		exit 1
+	fi
+	sleep 1
+done
+
+echo 'api: ready'

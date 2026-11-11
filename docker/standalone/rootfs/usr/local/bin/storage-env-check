@@ -1,0 +1,136 @@
+#!/bin/sh
+# Refuses to boot a container that was started without the secrets it cannot invent.
+#
+# Every one of these has a working default in the application code, which is exactly the problem:
+# a default JWT secret lets anyone mint an admin token, a default encryption key makes "encrypted
+# at rest" a decoration, and a default presign origin hands out share links nobody can open. A
+# container is a black box - a wrong default here is not visible until it is exploited, so the
+# image treats an unset value as a configuration error rather than as a preference.
+#
+# Every problem is reported before exiting: an operator fixing a compose file should see the whole
+# list once, not discover the next missing variable on the next restart.
+set -u
+
+failed=0
+
+fail() {
+	printf '  [x] %s\n' "$*" >&2
+	failed=1
+}
+
+note() {
+	printf '  [!] %s\n' "$*" >&2
+}
+
+# Values shipped in `.env.sample` and hard-coded as fallbacks in the application config. A
+# deployment still carrying one of them has been started, not configured.
+is_placeholder() {
+	case "$1" in
+		dev-secret-change-me) return 0 ;;
+		dev-secret-password-32-chars-min) return 0 ;;
+		'dev-encryption-key-32-chars-min!') return 0 ;;
+		admin12345) return 0 ;;
+		change-me | changeme | password | secret | postgres) return 0 ;;
+	esac
+	return 1
+}
+
+require_secret() {
+	name=$1
+	minimum=$2
+	eval "value=\${$name:-}"
+
+	if [ -z "$value" ]; then
+		fail "$name is not set"
+		return
+	fi
+	if is_placeholder "$value"; then
+		fail "$name still holds one of the documented example values"
+		return
+	fi
+	if [ "${#value}" -lt "$minimum" ]; then
+		fail "$name is ${#value} characters long, at least $minimum are required"
+	fi
+}
+
+require_port() {
+	name=$1
+	eval "value=\${$name:-}"
+
+	case "$value" in
+		'' | *[!0-9]*) fail "$name must be a port number, got '${value}'" ;;
+		*) [ "$value" -ge 1 ] && [ "$value" -le 65535 ] || fail "$name is outside 1-65535" ;;
+	esac
+}
+
+echo 'storage: checking configuration'
+
+# Signs the management UI's access and refresh tokens. A known secret is an admin account.
+require_secret JWT_SECRET 32
+
+# Decrypts the S3 secret keys - they have to be recoverable to verify a SigV4 signature, so this
+# is the only thing standing between a database dump and every credential in it.
+require_secret CRYPTOGRAPHIC_PASSWORD 32
+
+# Wraps the per-object data keys. Demanding it explicitly is deliberate: it is the one value whose
+# loss cannot be recovered from a backup of anything else.
+if [ "${STORAGE_ENCRYPTION:-true}" != 'false' ]; then
+	require_secret STORAGE_ENCRYPTION_KEY 32
+fi
+
+# The admin account created on first boot. The container is usually reachable long before anyone
+# logs in to change it.
+require_secret BOOTSTRAP_ADMIN_PASSWORD 12
+
+# The origin presigned share links are built against. Nothing in the container can derive it -
+# it depends on the port mapping and the proxy in front, both outside the container's view.
+if [ -z "${S3_PUBLIC_URL:-}" ]; then
+	fail 'S3_PUBLIC_URL is not set'
+else
+	case "$S3_PUBLIC_URL" in
+		http://* | https://*) ;;
+		*) fail "S3_PUBLIC_URL must be an absolute URL, got '${S3_PUBLIC_URL}'" ;;
+	esac
+fi
+
+require_port WEB_PORT
+require_port API_PORT
+require_port S3_PORT
+require_port POSTGRES_PORT
+require_port VALKEY_PORT
+
+# Not fatal, only surprising: an absolute API URL takes the browser off the UI's own origin, and
+# then the management API has to be told to accept that origin.
+case "${API_PUBLIC_URL:-}" in
+	http://* | https://*)
+		[ -n "${CORS:-}" ] || note "API_PUBLIC_URL points at another origin but CORS is unset - the browser will be refused by the management API"
+		;;
+esac
+
+if [ "${STORAGE_ENCRYPTION:-true}" = 'false' ]; then
+	note 'STORAGE_ENCRYPTION=false - object payloads are written to disk in the clear'
+fi
+
+if [ "$failed" -ne 0 ]; then
+	cat >&2 <<'HELP'
+
+storage: refusing to start.
+
+  These variables have no safe default, so the image does not invent one:
+
+    JWT_SECRET               >= 32 chars   signs management UI sessions
+    CRYPTOGRAPHIC_PASSWORD   >= 32 chars   encrypts S3 secret keys at rest
+    STORAGE_ENCRYPTION_KEY   >= 32 chars   wraps the per-object data keys (unless STORAGE_ENCRYPTION=false)
+    BOOTSTRAP_ADMIN_PASSWORD >= 12 chars   password of the admin account created on first boot
+    S3_PUBLIC_URL            absolute URL  origin presigned links are built against
+
+  Generate the three secrets once and keep them - rotating STORAGE_ENCRYPTION_KEY without
+  re-wrapping makes every object written under the old key unreadable:
+
+    openssl rand -base64 36
+
+HELP
+	exit 1
+fi
+
+echo 'storage: configuration ok'
