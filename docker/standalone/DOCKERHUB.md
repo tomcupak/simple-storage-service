@@ -312,10 +312,10 @@ the blobs it names, never newer.
 | Tag | |
 | --- | --- |
 | `latest` | the newest stable release |
-| `1.2.0`, `1.2` | a release, and the newest patch of that minor |
+| `1.2.0` | one specific release |
+| `1.2`, `1` | the newest release of that minor, of that major |
 | `beta` | the newest prerelease. Never the same image as `latest` |
 | `1.2.0-beta.1` | one specific prerelease |
-| `sha-abc1234` | one specific commit |
 
 A prerelease never moves `latest`, `1.2` or `1`, so following `latest` will not pull a beta.
 

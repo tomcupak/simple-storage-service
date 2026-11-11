@@ -50,7 +50,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}},value=${{ inputs.tag || github.ref_name }}
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag || github.ref_name }}
-            type=sha
+            type=semver,pattern={{major}},value=${{ inputs.tag || github.ref_name }}
 
       - uses: docker/build-push-action@v6
         with:
@@ -113,10 +113,12 @@ jobs:
           images: |
             ${{ env.REGISTRY }}/${{ github.repository }}/standalone
             docker.io/${{ steps.hub.outputs.repository }}
-          # A stable tag (v1.2.0) gets 1.2.0, 1.2, sha-... and latest; `latest` comes from the
-          # `flavor` default (`latest=auto`), which knows to skip a prerelease. A prerelease tag
-          # (v1.2.0-beta.1) gets only 1.2.0-beta.1 and sha-...: semver patterns collapse to the
-          # full version for a prerelease, so a beta can never move 1.2 or latest.
+          # A stable tag (v1.2.0) gets 1.2.0, 1.2, 1 and latest; `latest` comes from the `flavor`
+          # default (`latest=auto`), which knows to skip a prerelease. A prerelease tag
+          # (v1.2.0-beta.1) gets only 1.2.0-beta.1: semver patterns collapse to the full version
+          # for a prerelease, so a beta can never move 1.2, 1 or latest. The major tag is skipped
+          # for 0.x, where a major version promises no compatibility. No `sha-...` tags: every
+          # published image is a release, and its version is the name to pull it by.
           #
           # `beta` on top of that is a channel pointer - "the newest prerelease" - for someone who
           # wants to follow them without reading the tag list. `is_default_branch` is deliberately
@@ -124,7 +126,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}},value=${{ inputs.tag || github.ref_name }}
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.tag || github.ref_name }}
-            type=sha
+            type=semver,pattern={{major}},value=${{ inputs.tag || github.ref_name }}
             type=raw,value=beta,enable=${{ contains(inputs.tag || github.ref_name, '-beta') }}
 
       - uses: docker/build-push-action@v6
