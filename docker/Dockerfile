@@ -11,8 +11,14 @@
 # stage installs a handful of packages rather than the whole dev tree.
 
 # ---------------------------------------------------------------- build
+#
+# Always runs on the builder's own platform, even in a multi-platform build: its output - two
+# webpack bundles with node_modules left external, their generated package.json, the SQL
+# migrations and the static UI - is architecture-neutral. Only the runtime stages, which install
+# the production dependencies (sharp ships a native binary per architecture), run per target
+# platform, so an arm64 image emulates an `npm install` rather than the whole build.
 
-FROM node:26-alpine AS build
+FROM --platform=$BUILDPLATFORM node:26-alpine AS build
 WORKDIR /build
 
 # Dependencies first: they change far less often than the sources, so this layer is reused

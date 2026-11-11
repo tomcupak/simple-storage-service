@@ -366,6 +366,11 @@ static bundle cannot bake the API address in. `docker-compose.prod.yml` wires th
 together, `deploy/*.service` are systemd units for a deployment without containers, and
 `.github/workflows/release.yml` pushes images on a `v*` tag.
 
+Every image is published for `linux/amd64` and `linux/arm64` as one manifest list per tag (no
+arch suffixes). The `build` stage is pinned to `$BUILDPLATFORM` because its output is
+architecture-neutral; only the runtime stages' installs run under QEMU, so keep anything
+arch-specific (native modules, downloaded binaries) out of `build` and in the runtime stages.
+
 ## The standalone image
 
 `--target standalone` is the whole product in one container - both apps, the UI, Postgres and
