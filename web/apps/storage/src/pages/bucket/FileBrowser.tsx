@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
 
 import { api, type BucketItem, type ListObjectsResponse, type ObjectItem } from '../../api/client'
@@ -45,20 +45,28 @@ export function FileBrowser({ bucketName, versioned }: { bucketName: string, ver
 	const [tokens, setTokens] = useState<(string | undefined)[]>([undefined])
 	const [pageIndex, setPageIndex] = useState(0)
 
+	// Listings can finish out of order - a folder with many subfolders takes far longer than a
+	// leaf one - so only the most recent request may touch state. Otherwise a slow listing of
+	// the parent lands after the child's and its folders get sliced by the child's prefix,
+	// which renders them as rows without names.
+	const latestRequest = useRef(0)
+
 	const load = useCallback(async (continuationToken: string | undefined) => {
+		const request = ++latestRequest.current
 		setLoading(true)
 		setError(null)
 		try {
-			setListing(await api.listObjects(bucketName, {
+			const result = await api.listObjects(bucketName, {
 				prefix,
 				delimiter: DELIMITER,
 				maxKeys: PAGE_SIZE,
 				continuationToken,
-			}))
+			})
+			if (request === latestRequest.current) setListing(result)
 		} catch (err) {
-			setError(err)
+			if (request === latestRequest.current) setError(err)
 		} finally {
-			setLoading(false)
+			if (request === latestRequest.current) setLoading(false)
 		}
 	}, [bucketName, prefix])
 
