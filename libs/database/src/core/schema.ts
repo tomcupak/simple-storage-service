@@ -131,7 +131,7 @@ export const object = pgTable('object', {
 	updatedAt,
 }, (t) => [
 	uniqueIndex('unique_object_bucket_key').on(t.bucketGuid, t.key),
-	index('idx_object_bucket_key_prefix').on(t.bucketGuid, t.key),
+	index('idx_object_bucket_key_c').on(t.bucketGuid, sql`${t.key} COLLATE "C"`),
 ])
 
 export const objectVersion = pgTable('object_version', {
@@ -183,7 +183,7 @@ export const multipartUpload = pgTable('multipart_upload', {
 	updatedAt,
 }, (t) => [
 	uniqueIndex('unique_multipart_upload_id').on(t.uploadId),
-	index('idx_multipart_upload_bucket_key').on(t.bucketGuid, t.key),
+	index('idx_multipart_upload_bucket_key_c').on(t.bucketGuid, sql`${t.key} COLLATE "C"`),
 ])
 
 export const multipartPart = pgTable('multipart_part', {

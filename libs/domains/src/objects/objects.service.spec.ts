@@ -384,6 +384,45 @@ describe('DB', () => {
 			expect(second.isTruncated).toBe(false)
 		})
 
+		it('seeks past a folder to the key that sorts right after it', async () => {
+			const context = await makeBucket()
+			for (const key of ['a/1', 'a/2', 'a0', 'a-x', 'b']) await put(context, key)
+
+			const result = await service.list({ bucketGuid: context.guid, delimiter: '/' })
+
+			expect(result.commonPrefixes).toEqual(['a/'])
+			expect(result.objects.map((object) => object.key)).toEqual(['a-x', 'a0', 'b'])
+		})
+
+		it('pages one entry at a time across a folder boundary', async () => {
+			const context = await makeBucket()
+			for (const key of ['a/1', 'a/2', 'a0', 'a-x', 'b']) await put(context, key)
+
+			const seen: string[] = []
+			let continuationToken: string | undefined
+			do {
+				const page = await service.list({ bucketGuid: context.guid, delimiter: '/', maxKeys: 1, continuationToken })
+				seen.push(...page.commonPrefixes, ...page.objects.map((object) => object.key))
+				continuationToken = page.nextContinuationToken
+			} while (continuationToken)
+
+			expect(seen).toEqual(['a-x', 'a/', 'a0', 'b'])
+		})
+
+		it('collapses on a multi-character delimiter and seeks past it', async () => {
+			const context = await makeBucket()
+			for (const key of ['a::1', 'a::2', 'a:x', 'a;', 'b']) await put(context, key)
+
+			const first = await service.list({ bucketGuid: context.guid, delimiter: '::', maxKeys: 1 })
+			expect(first.commonPrefixes).toEqual(['a::'])
+			expect(first.isTruncated).toBe(true)
+
+			const rest = await service.list({
+				bucketGuid: context.guid, delimiter: '::', continuationToken: first.nextContinuationToken,
+			})
+			expect(rest.objects.map((object) => object.key)).toEqual(['a:x', 'a;', 'b'])
+		})
+
 		it('resumes after a plain key with start-after', async () => {
 			const context = await makeBucket()
 			await put(context, 'a.txt')

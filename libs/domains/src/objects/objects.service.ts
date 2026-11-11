@@ -936,11 +936,32 @@ export class ObjectsService {
 				eq(coreSchema.object.bucketGuid, bucketGuid),
 				eq(coreSchema.objectVersion.isDeleteMarker, false),
 				prefix ? this.likePrefix(coreSchema.object.key, prefix) : undefined,
-				cursor ? this.collatedGreater(coreSchema.object.key, cursor) : undefined,
-				excludePrefix ? this.notLikePrefix(coreSchema.object.key, excludePrefix) : undefined,
+				...this.resumeConditions(cursor, excludePrefix),
 			))
 			.orderBy(this.collatedAsc(coreSchema.object.key))
 			.limit(limit)
+	}
+
+	/** Lower bound of a listing page. After a collapsed folder the scan seeks straight to the
+	 *  folder's successor, so the keys inside it are never read; where no successor exists the
+	 *  folder is filtered out with NOT LIKE instead. */
+	private resumeConditions(cursor?: string, excludePrefix?: string): Array<SQL | undefined> {
+		const successor = excludePrefix ? this.prefixSuccessor(excludePrefix) : undefined
+		if (excludePrefix && successor) return [this.collatedGreaterOrEqual(coreSchema.object.key, successor)]
+		return [
+			cursor ? this.collatedGreater(coreSchema.object.key, cursor) : undefined,
+			excludePrefix ? this.notLikePrefix(coreSchema.object.key, excludePrefix) : undefined,
+		]
+	}
+
+	/** Smallest string above every key that starts with `prefix`, in byte order: the prefix with
+	 *  its last UTF-16 code unit incremented. Incrementing keeps UTF-8 byte order only below the
+	 *  surrogate range, so anything else returns undefined and the caller falls back. */
+	private prefixSuccessor(prefix: string): string | undefined {
+		if (!prefix) return undefined
+		const lastUnit = prefix.charCodeAt(prefix.length - 1)
+		if (lastUnit >= 0xD800 - 1) return undefined
+		return prefix.slice(0, -1) + String.fromCharCode(lastUnit + 1)
 	}
 
 	/** Key segment between `prefix` and the first `delimiter` after it, or undefined when the
