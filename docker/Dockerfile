@@ -34,7 +34,13 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY --from=build /build/dist/apps/api/package.json ./package.json
-RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+# npm is needed for this one install and never again; the copy bundled with the base image drags
+# its own dependency tree (undici, glob, minimatch, ...) into every vulnerability scan, so it goes.
+RUN apk upgrade --no-cache \
+	&& npm install --omit=dev --no-audit --no-fund \
+	&& npm cache clean --force \
+	&& rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+		/usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
 COPY --from=build /build/dist/apps/api/main.js ./main.js
 # The migrations are SQL files, not code, so the bundle cannot carry them.
@@ -59,7 +65,13 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY --from=build /build/dist/apps/s3/package.json ./package.json
-RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+# npm is needed for this one install and never again; the copy bundled with the base image drags
+# its own dependency tree (undici, glob, minimatch, ...) into every vulnerability scan, so it goes.
+RUN apk upgrade --no-cache \
+	&& npm install --omit=dev --no-audit --no-fund \
+	&& npm cache clean --force \
+	&& rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+		/usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
 COPY --from=build /build/dist/apps/s3/main.js ./main.js
 
@@ -78,6 +90,8 @@ CMD ["node", "--enable-source-maps", "main.js"]
 # ---------------------------------------------------------------- web
 
 FROM nginx:alpine AS web
+
+RUN apk upgrade --no-cache
 
 # `web/vite.config.storage.mts` resolves its outDir against `root: 'apps/storage'`, so the
 # bundle lands under `web/dist`, not in the repository's top-level `dist`.
@@ -107,8 +121,10 @@ ARG TARGETARCH
 
 # Postgres 18 is pinned to a major version on purpose: the cluster in the volume is written in the
 # on-disk format of the server that created it, and a server one major ahead refuses to open it.
-# Bumping this line is a migration, not an upgrade.
-RUN apk add --no-cache postgresql18 postgresql18-client valkey nginx ca-certificates tzdata libcap
+# Bumping this line is a migration, not an upgrade. `apk upgrade` comes first because the base image
+# is rebuilt less often than Alpine ships security fixes (zlib, openssl, ...).
+RUN apk upgrade --no-cache \
+	&& apk add --no-cache postgresql18 postgresql18-client valkey nginx ca-certificates tzdata libcap
 
 # s6-overlay is the process supervisor: five processes in one container need something that reaps
 # orphans, starts them in dependency order and takes them all down on one SIGTERM. It is not in
@@ -147,14 +163,18 @@ RUN addgroup -g 10001 -S storage \
 WORKDIR /app
 
 # Both bundles run out of one node_modules. The two generated dependency lists come from the same
-# lockfile, so the merge is a union - and the script stops the build if it ever is not.
+# lockfile, so the merge is a union - and the script stops the build if it ever is not. npm itself
+# is removed once it has installed them: nothing runs it afterwards, and the copy bundled with the
+# base image only adds its own dependency tree to every vulnerability scan.
 COPY --from=build /build/dist/apps/api/package.json ./api/package.json
 COPY --from=build /build/dist/apps/s3/package.json ./s3/package.json
 COPY docker/standalone/merge-package-json.mjs /tmp/merge-package-json.mjs
 RUN node /tmp/merge-package-json.mjs /app/package.json /app/api/package.json /app/s3/package.json \
 	&& npm install --omit=dev --no-audit --no-fund \
 	&& npm cache clean --force \
-	&& rm -f /tmp/merge-package-json.mjs /app/api/package.json /app/s3/package.json
+	&& rm -f /tmp/merge-package-json.mjs /app/api/package.json /app/s3/package.json \
+	&& rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+		/usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 
 COPY --from=build /build/dist/apps/api/main.js ./api/main.js
 COPY --from=build /build/dist/apps/s3/main.js ./s3/main.js
