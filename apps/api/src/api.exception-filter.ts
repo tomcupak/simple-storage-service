@@ -6,6 +6,7 @@ import { MigrationTypes } from '@storage/domains/migration'
 import { ObjectsTypes } from '@storage/domains/objects'
 import { PoliciesTypes } from '@storage/domains/policies'
 import { StorageTypes } from '@storage/domains/storage'
+import { ThumbnailsTypes } from '@storage/domains/thumbnails'
 import { UsageTypes } from '@storage/domains/usage'
 import { UsersTypes } from '@storage/domains/users'
 import { Response } from 'express'
@@ -47,6 +48,9 @@ const DOMAIN_ERRORS: [new (...args: never[]) => Error, HttpStatus][] = [
 	[ObjectsTypes.InvalidRangeError, HttpStatus.BAD_REQUEST],
 	[StorageTypes.PayloadTooLargeError, HttpStatus.PAYLOAD_TOO_LARGE],
 	[StorageTypes.EncryptionKeyError, HttpStatus.INTERNAL_SERVER_ERROR],
+
+	[ThumbnailsTypes.ThumbnailUnsupportedError, HttpStatus.UNSUPPORTED_MEDIA_TYPE],
+	[ThumbnailsTypes.ThumbnailSourceTooLargeError, HttpStatus.PAYLOAD_TOO_LARGE],
 
 	[PoliciesTypes.InvalidPolicyDocumentError, HttpStatus.BAD_REQUEST],
 	[PoliciesTypes.PolicyNotFoundError, HttpStatus.NOT_FOUND],

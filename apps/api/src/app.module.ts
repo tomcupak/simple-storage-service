@@ -13,6 +13,7 @@ import { PoliciesModule } from '@storage/domains/policies'
 import { RateLimitModule } from '@storage/domains/rate-limit'
 import { S3Module } from '@storage/domains/s3'
 import { StorageModule } from '@storage/domains/storage'
+import { ThumbnailsModule } from '@storage/domains/thumbnails'
 import { UsageModule } from '@storage/domains/usage'
 import { UsersModule } from '@storage/domains/users'
 import { RequestLogService } from '@storage/shared'
@@ -43,6 +44,8 @@ import { ApiUsersModule } from './users/users.module'
 		GcModule.forRoot({ gc: config.gc }),
 		// Likewise the migration worker: it runs here, never in `apps/s3`.
 		MigrationModule.forRoot({ migration: config.migration }),
+
+		ThumbnailsModule.forRoot({ thumbnails: config.thumbnails }),
 
 		UsersModule,
 		AccessKeysModule,

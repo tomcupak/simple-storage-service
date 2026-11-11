@@ -1,7 +1,7 @@
 import '@nestjs/platform-express'
 
 import { Logger, ValidationPipe, VersioningType } from '@nestjs/common'
-import { NestFactory } from '@nestjs/core'
+import { NestFactory, Reflector } from '@nestjs/core'
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger'
 import { migrateDb } from '@storage/database'
 import { AuthGuard } from '@storage/domains/auth'
@@ -42,7 +42,7 @@ async function bootstrap() {
 	// Order is the point: the rate limiter runs after authentication so a signed-in caller is
 	// counted per user rather than per address. A request with a bad token is rejected before
 	// it reaches the counter - guessing tokens is not what the limiter is here to slow down.
-	app.useGlobalGuards(new AuthGuard(app), new ApiRateLimitGuard(app.get(RateLimitService)))
+	app.useGlobalGuards(new AuthGuard(app), new ApiRateLimitGuard(app.get(RateLimitService), app.get(Reflector)))
 
 	const swaggerConfig = new DocumentBuilder()
 		.setTitle(config.openApi.title)

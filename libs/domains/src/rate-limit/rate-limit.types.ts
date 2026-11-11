@@ -6,7 +6,13 @@ export namespace RateLimitTypes {
 		windowSeconds: number
 		/** Requests one caller may make inside a window. */
 		max: number
+		/** Requests one caller may make per window against the `thumbnail` budget. */
+		thumbnailMax: number
 	}
+
+	/** Which budget a request is counted against. Each has its own counter and its own ceiling,
+	 *  so spending one never blocks the other. */
+	export type Budget = 'default' | 'thumbnail'
 
 	export interface ValkeyConfig {
 		host: string

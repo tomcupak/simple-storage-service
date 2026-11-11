@@ -9,7 +9,9 @@ import {
 	ApiOkResponse,
 	ApiPayloadTooLargeResponse,
 	ApiProduces,
+	ApiResponse,
 	ApiTags,
+	ApiUnsupportedMediaTypeResponse,
 } from '@nestjs/swagger'
 import { AuditAction, BucketPermission } from '@storage/database'
 import { AccessKeysService } from '@storage/domains/access-keys'
@@ -17,7 +19,9 @@ import { Audited } from '@storage/domains/audit'
 import { AuthTypes, AuthUser, SecuredEp } from '@storage/domains/auth'
 import { BucketsService } from '@storage/domains/buckets'
 import { ObjectsDto, ObjectsService, ObjectsTypes } from '@storage/domains/objects'
+import { RateLimitBudget } from '@storage/domains/rate-limit'
 import { S3SignatureService } from '@storage/domains/s3'
+import { ThumbnailsDto, ThumbnailsService, ThumbnailsTypes } from '@storage/domains/thumbnails'
 import { Api } from '@storage/shared'
 import { Request, Response } from 'express'
 
@@ -32,6 +36,7 @@ export class ObjectsControllerV1 {
 		private readonly bucketsService: BucketsService,
 		private readonly accessKeysService: AccessKeysService,
 		private readonly signatureService: S3SignatureService,
+		private readonly thumbnailsService: ThumbnailsService,
 	) {}
 
 	@Get()
@@ -104,6 +109,54 @@ export class ObjectsControllerV1 {
 		// Field by field, not a spread: `put` also returns the version's wrapped data key, and
 		// nothing about how an object is encrypted belongs in an answer to its uploader.
 		return { key: query.key, etag: written.etag, size: written.size, versionId: written.versionId }
+	}
+
+	/** Deliberately not `@Audited`: a listing page asks for up to a hundred of these at once and
+	 *  they would drown the entries that matter. It has its own rate budget for the same reason.
+	 *  Nothing is cached here - `no-cache` makes the browser revalidate, and the ETag answers
+	 *  that with a 304 before the blob is read, so an overwritten key is never served stale. */
+	@Get('thumbnail')
+	@SecuredEp()
+	@RateLimitBudget('thumbnail')
+	@ApiProduces('image/webp')
+	@ApiOkResponse({ description: 'A WebP thumbnail fitting inside the requested size' })
+	@ApiResponse({ status: 304, description: 'If-None-Match matched the thumbnail ETag' })
+	@ApiNotFoundResponse({ type: ObjectsDto.ObjectNotFoundError })
+	@ApiForbiddenResponse({ type: ObjectsDto.ObjectForbiddenError })
+	@ApiPayloadTooLargeResponse({ type: ThumbnailsDto.ThumbnailSourceTooLargeError })
+	@ApiUnsupportedMediaTypeResponse({ type: ThumbnailsDto.ThumbnailUnsupportedError })
+	async thumbnail(
+		@Param('bucketName') bucketName: string,
+		@Query() query: ThumbnailsDto.ThumbnailQuery,
+		@Req() req: Request,
+		@Res() res: Response,
+		@AuthUser() user: AuthTypes.Identity,
+	): Promise<void> {
+		const bucket = await this.bucketsService.getForUser({ name: bucketName, userGuid: user.guid, role: user.role, permission: BucketPermission.read })
+		const version = await this.objectsService.getVersion({ bucketGuid: bucket.guid, key: query.key, versionId: query.versionId })
+		if (version.isDeleteMarker || !version.storagePath) throw new ObjectsTypes.ObjectNotFoundError()
+
+		const size = query.size ?? ThumbnailsTypes.DEFAULT_SIZE
+		const etag = `"${version.etag}-t${size}"`
+
+		if (this.thumbnailsService.matchesEtag(req.headers['if-none-match'], etag)) {
+			res.setHeader('ETag', etag)
+			res.setHeader('Cache-Control', 'private, no-cache')
+			res.status(304).end()
+			return
+		}
+
+		if (!this.thumbnailsService.isSupported(version.contentType, query.key)) throw new ThumbnailsTypes.ThumbnailUnsupportedError()
+		this.thumbnailsService.assertSourceSize(version.size)
+
+		const payload = await this.objectsService.readPayload({ storagePath: version.storagePath, encryption: version.encryption })
+		const image = await this.thumbnailsService.render({ stream: payload.stream, contentType: version.contentType, size, key: query.key })
+
+		res.setHeader('ETag', etag)
+		res.setHeader('Cache-Control', 'private, no-cache')
+		res.setHeader('Content-Type', ThumbnailsTypes.OUTPUT_CONTENT_TYPE)
+		res.setHeader('Content-Length', String(image.length))
+		res.status(200).end(image)
 	}
 
 	@Get('download')

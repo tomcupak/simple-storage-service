@@ -190,6 +190,15 @@ what the image ships with.
 | `API_MAX_BODY_BYTES` | `1mb` | Largest JSON/form body. Object payloads bypass the parsers entirely |
 | `API_PRESIGN_DEFAULT_SECONDS` | `3600` | Lifetime of a presigned link when the caller does not ask for one |
 
+### Thumbnails
+
+The file browser's image previews are rendered on the server (JPEG, PNG, WebP, GIF, AVIF, TIFF;
+not SVG or HEIC) and not cached on it - the browser revalidates by ETag.
+
+| Variable | Default | |
+| --- | --- | --- |
+| `THUMBNAIL_MAX_SOURCE_BYTES` | `52428800` | Largest image a thumbnail is rendered from; bigger ones answer 413 |
+
 ### Rate limiting
 
 Counted in the embedded Valkey. An unreachable counter store lets requests through rather than
@@ -200,6 +209,7 @@ blocking them — it is an accessory, not a dependency.
 | `RATE_LIMIT_ENABLED` | `true` | |
 | `RATE_LIMIT_WINDOW_SECONDS` | `60` | Length of the fixed window |
 | `RATE_LIMIT_MAX` | `600` | Requests one caller may make per window |
+| `RATE_LIMIT_THUMBNAIL_MAX` | `3000` | Same, for image thumbnails only, which have their own counter so a file listing does not spend the budget above |
 
 ### Garbage collection
 

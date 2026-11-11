@@ -4,12 +4,14 @@ import { useI18n } from '../i18n'
 
 /** Dialog shell: backdrop, Escape to close and a title row. The content decides its own
  *  buttons, because every dialog here has a different primary action. */
-export function Modal({ title, onClose, children, footer, wide }: {
+export function Modal({ title, onClose, children, footer, wide, fullscreen }: {
 	title: string
 	onClose: () => void
 	children: React.ReactNode
 	footer?: React.ReactNode
 	wide?: boolean
+	/** Near full-screen on a dark backdrop, for the image and PDF viewers. */
+	fullscreen?: boolean
 }) {
 	const { t } = useI18n()
 
@@ -22,9 +24,9 @@ export function Modal({ title, onClose, children, footer, wide }: {
 	}, [onClose])
 
 	return (
-		<div className="modal-backdrop" onClick={onClose}>
+		<div className={`modal-backdrop${fullscreen ? ' modal-backdrop-dark' : ''}`} onClick={onClose}>
 			<div
-				className={`card modal${wide ? ' modal-wide' : ''}`}
+				className={`card modal${wide ? ' modal-wide' : ''}${fullscreen ? ' modal-full' : ''}`}
 				role="dialog"
 				aria-modal="true"
 				aria-label={title}

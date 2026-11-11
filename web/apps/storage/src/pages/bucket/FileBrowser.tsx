@@ -8,11 +8,13 @@ import { EmptyState } from '../../components/EmptyState'
 import { ErrorText } from '../../components/ErrorText'
 import { Modal } from '../../components/Modal'
 import { ObjectPreview } from '../../components/ObjectPreview'
+import { ObjectThumbnail } from '../../components/ObjectThumbnail'
 import { ObjectVersions } from '../../components/ObjectVersions'
 import { ShareLinkDialog } from '../../components/ShareLinkDialog'
 import { TableSkeleton } from '../../components/Skeleton'
 import { UploadPanel } from '../../components/UploadPanel'
 import { useI18n } from '../../i18n'
+import { previewKind } from '../../lib/fileType'
 import { baseName, formatDate, formatSize } from '../../lib/format'
 
 const DELIMITER = '/'
@@ -112,6 +114,12 @@ export function FileBrowser({ bucketName, versioned }: { bucketName: string, ver
 			return left.key.localeCompare(right.key) * factor
 		})
 	}, [listing, sort])
+
+	/** What the image viewer pages through: the images of this listing page, in display order. */
+	const gallery = useMemo(
+		() => sortedObjects.filter((object) => previewKind(object.contentType, object.key) === 'image'),
+		[sortedObjects],
+	)
 
 	const sortedPrefixes = useMemo(() => {
 		const prefixes = [...(listing?.commonPrefixes ?? [])]
@@ -225,7 +233,23 @@ export function FileBrowser({ bucketName, versioned }: { bucketName: string, ver
 
 						{!loading && sortedObjects.map((object) => (
 							<tr key={object.key}>
-								<td className="ellipsis">{object.key.slice(prefix.length)}</td>
+								<td>
+									<div className="name-cell">
+										<ObjectThumbnail
+											bucketName={bucketName}
+											object={object}
+											onClick={() => setDialog({ kind: 'preview', object })}
+										/>
+										<button
+											type="button"
+											className="link ellipsis"
+											title={t('files.preview')}
+											onClick={() => setDialog({ kind: 'preview', object })}
+										>
+											{object.key.slice(prefix.length)}
+										</button>
+									</div>
+								</td>
 								<td>{formatSize(object.size)}</td>
 								<td className="muted">{object.contentType ?? '—'}</td>
 								<td>{formatDate(object.lastModified)}</td>
@@ -283,9 +307,9 @@ export function FileBrowser({ bucketName, versioned }: { bucketName: string, ver
 			{dialog?.kind === 'preview' && dialog.object && (
 				<ObjectPreview
 					bucketName={bucketName}
-					objectKey={dialog.object.key}
-					contentType={dialog.object.contentType}
-					size={dialog.object.size}
+					object={dialog.object}
+					gallery={gallery}
+					onNavigate={(object) => setDialog({ kind: 'preview', object })}
 					onClose={() => setDialog(null)}
 				/>
 			)}

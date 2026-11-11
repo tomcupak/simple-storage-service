@@ -1,85 +1,90 @@
 import { useEffect, useState } from 'react'
 
+import { type ObjectItem } from '../api/client'
 import { downloadObject, saveBlob } from '../api/transfer'
 import { useI18n } from '../i18n'
+import { type PreviewKind, previewKind } from '../lib/fileType'
 import { baseName, formatSize } from '../lib/format'
 import { ErrorText } from './ErrorText'
+import { ImageViewer } from './ImageViewer'
 import { Modal } from './Modal'
+import { PdfViewer } from './PdfViewer'
 
 /** Anything larger is offered as a download instead - a preview is meant to be a glance, and a
- *  100 MB "text file" would freeze the tab. */
-const MAX_PREVIEW_BYTES = 5 * 1024 * 1024
+ *  100 MB "text file" would freeze the tab. Images and PDFs get more room because the browser
+ *  decodes them natively / page by page. */
+const MAX_TEXT_BYTES = 5 * 1024 * 1024
+const MAX_IMAGE_BYTES = 50 * 1024 * 1024
+const MAX_PDF_BYTES = 100 * 1024 * 1024
 
-type PreviewKind = 'image' | 'pdf' | 'text' | 'unsupported'
+function limitFor(kind: PreviewKind): number {
+	if (kind === 'image') return MAX_IMAGE_BYTES
+	if (kind === 'pdf') return MAX_PDF_BYTES
 
-function previewKind(contentType: string | null | undefined, key: string): PreviewKind {
-	const type = (contentType ?? '').toLowerCase()
-
-	if (type.startsWith('image/')) return 'image'
-	if (type === 'application/pdf') return 'pdf'
-	if (type.startsWith('text/') || /^application\/(json|xml|javascript|x-yaml)/.test(type)) return 'text'
-	// Some clients upload without a usable type, so the extension gets a say as well.
-	if (/\.(txt|md|json|xml|ya?ml|csv|log|ini|conf|ts|tsx|js|css|html?)$/i.test(key)) return 'text'
-
-	return 'unsupported'
+	return MAX_TEXT_BYTES
 }
 
-export function ObjectPreview({ bucketName, objectKey, contentType, size, onClose }: {
+export function ObjectPreview({ bucketName, object, gallery, onNavigate, onClose }: {
 	bucketName: string
-	objectKey: string
-	contentType: string | null | undefined
-	size: number
+	object: ObjectItem
+	/** The previewable images of the current listing page, in display order. */
+	gallery: ObjectItem[]
+	onNavigate: (object: ObjectItem) => void
+	onClose: () => void
+}) {
+	const kind = previewKind(object.contentType, object.key)
+	const tooLarge = object.size > limitFor(kind)
+
+	if (kind === 'image' && !tooLarge) {
+		return <ImageViewer bucketName={bucketName} object={object} gallery={gallery} onNavigate={onNavigate} onClose={onClose} />
+	}
+	if (kind === 'pdf' && !tooLarge) {
+		return <PdfViewer bucketName={bucketName} objectKey={object.key} onClose={onClose} />
+	}
+
+	return <TextPreview bucketName={bucketName} object={object} kind={kind} tooLarge={tooLarge} onClose={onClose} />
+}
+
+function TextPreview({ bucketName, object, kind, tooLarge, onClose }: {
+	bucketName: string
+	object: ObjectItem
+	kind: PreviewKind
+	tooLarge: boolean
 	onClose: () => void
 }) {
 	const { t } = useI18n()
-	const kind = previewKind(contentType, objectKey)
-	const tooLarge = size > MAX_PREVIEW_BYTES
+	const objectKey = object.key
 
-	const [blob, setBlob] = useState<Blob | null>(null)
-	const [objectUrl, setObjectUrl] = useState<string | null>(null)
 	const [text, setText] = useState<string | null>(null)
 	const [error, setError] = useState<unknown>(null)
 	const [loading, setLoading] = useState(false)
 
 	useEffect(() => {
-		if (kind === 'unsupported' || tooLarge) return
+		if (kind !== 'text' || tooLarge) return
 
-		let revoked = false
-		let url: string | null = null
+		const controller = new AbortController()
 
 		const load = async () => {
 			setLoading(true)
 			setError(null)
 			try {
-				const payload = await downloadObject({ bucketName, key: objectKey })
-				if (revoked) return
-
-				setBlob(payload)
-				if (kind === 'text') {
-					setText(await payload.text())
-				} else {
-					url = URL.createObjectURL(payload)
-					setObjectUrl(url)
-				}
+				const payload = await downloadObject({ bucketName, key: objectKey, signal: controller.signal })
+				if (!controller.signal.aborted) setText(await payload.text())
 			} catch (err) {
-				setError(err)
+				if (!controller.signal.aborted) setError(err)
 			} finally {
-				setLoading(false)
+				if (!controller.signal.aborted) setLoading(false)
 			}
 		}
 
 		void load()
 
-		return () => {
-			revoked = true
-			if (url) URL.revokeObjectURL(url)
-		}
+		return () => controller.abort()
 	}, [bucketName, objectKey, kind, tooLarge])
 
 	const download = async () => {
 		try {
-			const payload = blob ?? await downloadObject({ bucketName, key: objectKey })
-			saveBlob(payload, baseName(objectKey))
+			saveBlob(await downloadObject({ bucketName, key: objectKey }), baseName(objectKey))
 		} catch (err) {
 			setError(err)
 		}
@@ -94,16 +99,10 @@ export function ObjectPreview({ bucketName, objectKey, contentType, size, onClos
 		>
 			<ErrorText error={error} />
 
-			{tooLarge && <p className="muted">{t('preview.tooLarge', { size: formatSize(size) })}</p>}
+			{tooLarge && <p className="muted">{t('preview.tooLarge', { size: formatSize(object.size) })}</p>}
 			{!tooLarge && kind === 'unsupported' && <p className="muted">{t('preview.unsupported')}</p>}
 			{loading && <p className="muted">{t('common.loading')}</p>}
 
-			{!tooLarge && kind === 'image' && objectUrl && (
-				<img className="preview-image" src={objectUrl} alt={baseName(objectKey)} />
-			)}
-			{!tooLarge && kind === 'pdf' && objectUrl && (
-				<iframe className="preview-frame" src={objectUrl} title={baseName(objectKey)} />
-			)}
 			{!tooLarge && kind === 'text' && text !== null && (
 				<pre className="preview-text">{text}</pre>
 			)}

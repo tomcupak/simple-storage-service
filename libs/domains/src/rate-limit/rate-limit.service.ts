@@ -52,10 +52,13 @@ export class RateLimitService {
 	}
 
 	/** Counts one request against a subject's window and says whether it may proceed. */
-	async consume(subject: RateLimitTypes.Subject): Promise<RateLimitTypes.Decision> {
-		if (!this.config.enabled || !this.client || !this.available) return this.allowAll()
+	async consume(subject: RateLimitTypes.Subject, budget: RateLimitTypes.Budget = 'default'): Promise<RateLimitTypes.Decision> {
+		const max = this.maxOf(budget)
+		if (!this.config.enabled || !this.client || !this.available) return this.allowAll(max)
 
-		const key = `ratelimit:${subject.kind}:${subject.id}:${this.windowIndex()}`
+		// The default budget keeps its original key shape, so a deploy does not reset counters.
+		const prefix = budget === 'default' ? 'ratelimit' : `ratelimit:${budget}`
+		const key = `${prefix}:${subject.kind}:${subject.id}:${this.windowIndex()}`
 
 		try {
 			const count = await this.client.incr(key)
@@ -64,15 +67,19 @@ export class RateLimitService {
 			if (count === 1) await this.client.expire(key, this.config.windowSeconds)
 
 			return {
-				allowed: count <= this.config.max,
-				limit: this.config.max,
-				remaining: Math.max(this.config.max - count, 0),
+				allowed: count <= max,
+				limit: max,
+				remaining: Math.max(max - count, 0),
 				retryAfterSeconds: this.retryAfterSeconds(),
 			}
 		} catch (err) {
 			this.markUnavailable(err)
-			return this.allowAll()
+			return this.allowAll(max)
 		}
+	}
+
+	private maxOf(budget: RateLimitTypes.Budget): number {
+		return budget === 'thumbnail' ? this.config.thumbnailMax : this.config.max
 	}
 
 	/** Windows are derived from the clock rather than from first contact, so every instance
@@ -86,8 +93,8 @@ export class RateLimitService {
 		return Math.max(this.config.windowSeconds - elapsed, 1)
 	}
 
-	private allowAll(): RateLimitTypes.Decision {
-		return { allowed: true, limit: this.config.max, remaining: this.config.max, retryAfterSeconds: 0 }
+	private allowAll(max: number): RateLimitTypes.Decision {
+		return { allowed: true, limit: max, remaining: max, retryAfterSeconds: 0 }
 	}
 
 	private markAvailable(): void {

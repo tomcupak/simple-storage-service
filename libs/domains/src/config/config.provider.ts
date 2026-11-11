@@ -32,6 +32,9 @@ export class ConfigProvider {
 			windowSeconds: Number(process.env.RATE_LIMIT_WINDOW_SECONDS || 60),
 			/** Requests one caller may make per window. */
 			max: Number(process.env.RATE_LIMIT_MAX || 600),
+			/** Own allowance for thumbnails: one file listing asks for dozens at once and would
+			 *  otherwise spend the budget everything else lives on. */
+			thumbnailMax: Number(process.env.RATE_LIMIT_THUMBNAIL_MAX || 3000),
 		},
 	} as const
 

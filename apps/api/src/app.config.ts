@@ -20,6 +20,11 @@ export const config = {
 	...ConfigProvider.gc,
 	...ConfigProvider.migration,
 
+	thumbnails: {
+		/** Largest source object a thumbnail is rendered from; bigger ones answer 413. */
+		maxSourceBytes: Number(process.env.THUMBNAIL_MAX_SOURCE_BYTES || 50 * 1024 * 1024),
+	},
+
 	/** Lifetime a shared presigned link gets when the caller does not ask for one. */
 	presignDefaultSeconds: Number(process.env.API_PRESIGN_DEFAULT_SECONDS || 3600),
 

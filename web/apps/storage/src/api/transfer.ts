@@ -28,14 +28,36 @@ export async function uploadObject({ bucketName, key, file, onProgress, signal }
 	})
 }
 
-export async function downloadObject({ bucketName, key, versionId }: {
+export async function downloadObject({ bucketName, key, versionId, signal }: {
 	bucketName: string
 	key: string
 	versionId?: string
+	signal?: AbortSignal
 }): Promise<Blob> {
 	const response = await instance.get<Blob>(`/v1/buckets/${encodeURIComponent(bucketName)}/objects/download`, {
 		params: { key, versionId },
 		responseType: 'blob',
+		signal,
+	})
+
+	return response.data
+}
+
+export type ThumbnailSize = 128 | 512
+
+/** A WebP rendition made by the server. The browser revalidates it by ETag (the endpoint answers
+ *  `no-cache`), so a repeated request is a cheap 304. */
+export async function fetchThumbnail({ bucketName, key, size, versionId, signal }: {
+	bucketName: string
+	key: string
+	size: ThumbnailSize
+	versionId?: string
+	signal?: AbortSignal
+}): Promise<Blob> {
+	const response = await instance.get<Blob>(`/v1/buckets/${encodeURIComponent(bucketName)}/objects/thumbnail`, {
+		params: { key, size, versionId },
+		responseType: 'blob',
+		signal,
 	})
 
 	return response.data
