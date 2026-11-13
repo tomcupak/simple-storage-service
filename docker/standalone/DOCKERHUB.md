@@ -174,6 +174,8 @@ what the image ships with.
 | Variable | Default | |
 | --- | --- | --- |
 | `BOOTSTRAP_ADMIN_EMAIL` | `admin@storage.local` | Admin account created on first boot |
+| `BOOTSTRAP_ACCESS_KEY_ID` | — | Optional fixed S3 access key id (16-128 characters of `A-Z`, `0-9`) created for the bootstrap admin at startup, for dev/CI setups that need a known credential. Set together with `BOOTSTRAP_SECRET_ACCESS_KEY` or not at all. An existing key (also deleted or disabled) is never changed or re-enabled. Owned by the user with `BOOTSTRAP_ADMIN_EMAIL`; if there is none (e.g. the admin's email was changed after the first boot), the key is skipped and an error is logged |
+| `BOOTSTRAP_SECRET_ACCESS_KEY` | — | Secret of that key, at least 32 characters. A credential in the environment - not for production |
 | `JWT_ACCESS_TTL` | `900` | Access token lifetime, seconds |
 | `JWT_REFRESH_TTL` | `2592000` | Refresh token lifetime, seconds |
 | `JWT_ISSUER` | `storage` | `iss` claim |

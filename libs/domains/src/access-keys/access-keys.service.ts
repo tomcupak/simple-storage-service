@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common'
+import { Injectable, Logger } from '@nestjs/common'
 import { AccessKeyStatus, coreSchema, DbProvider, UserRole } from '@storage/database'
 import { Api } from '@storage/shared'
 import * as crypto from 'crypto'
@@ -12,6 +12,8 @@ const SECRET_KEY_BYTES = 30
 
 @Injectable()
 export class AccessKeysService {
+	private logger = new Logger(AccessKeysService.name)
+
 	constructor(
 		private db: DbProvider,
 		private cryptographicService: CryptographicService,
@@ -80,6 +82,55 @@ export class AccessKeysService {
 			.returning()
 
 		return { ...this.toItem(created), secretAccessKey }
+	}
+
+	/** Makes sure a key supplied through the environment exists, for dev/CI setups that need a
+	 *  known credential. Only ever inserts: a key the admin deleted or disabled stays that way. */
+	async ensureBootstrapKey({ ownerEmail, accessKeyId, secretAccessKey }: { ownerEmail: string, accessKeyId: string, secretAccessKey: string }): Promise<void> {
+		const [owner] = await this.db.core
+			.select({ guid: coreSchema.user.guid })
+			.from(coreSchema.user)
+			.where(and(eq(coreSchema.user.email, ownerEmail.toLowerCase()), isNull(coreSchema.user.deletedAt)))
+			.limit(1)
+
+		if (!owner) {
+			this.logger.error(`Bootstrap access key skipped: no user '${ownerEmail}' exists to own it`)
+			return
+		}
+
+		const inserted = await this.db.core
+			.insert(coreSchema.accessKey)
+			.values({
+				accessKeyId,
+				userGuid: owner.guid,
+				secretKeyEncrypted: this.cryptographicService.encrypt(secretAccessKey),
+				description: AccessKeysTypes.BOOTSTRAP_KEY_DESCRIPTION,
+			})
+			.onConflictDoNothing({ target: coreSchema.accessKey.accessKeyId })
+			.returning({ accessKeyId: coreSchema.accessKey.accessKeyId })
+
+		if (inserted.length > 0) {
+			this.logger.warn(`Created access key '${accessKeyId}' from BOOTSTRAP_ACCESS_KEY_ID - it is a credential held in the environment`)
+			return
+		}
+
+		const [existing] = await this.db.core
+			.select()
+			.from(coreSchema.accessKey)
+			.where(eq(coreSchema.accessKey.accessKeyId, accessKeyId))
+			.limit(1)
+
+		if (!existing) return
+
+		if (existing.deletedAt) {
+			this.logger.warn(`Access key '${accessKeyId}' from BOOTSTRAP_ACCESS_KEY_ID was deleted - it is left deleted and will not authenticate`)
+		} else if (existing.status !== AccessKeyStatus.active) {
+			this.logger.warn(`Access key '${accessKeyId}' from BOOTSTRAP_ACCESS_KEY_ID is disabled - it is left disabled and will not authenticate`)
+		} else if (existing.userGuid !== owner.guid) {
+			this.logger.warn(`Access key '${accessKeyId}' from BOOTSTRAP_ACCESS_KEY_ID belongs to another user than '${ownerEmail}' - it is left as is`)
+		} else if (this.cryptographicService.decrypt(existing.secretKeyEncrypted) !== secretAccessKey) {
+			this.logger.warn(`Access key '${accessKeyId}' already exists with a different secret - BOOTSTRAP_SECRET_ACCESS_KEY is ignored`)
+		}
 	}
 
 	/** Admins manage every key; a plain user only their own. A key belonging to someone else

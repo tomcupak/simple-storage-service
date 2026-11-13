@@ -46,6 +46,14 @@ podman run -d --name storage-valkey --network host --restart on-failure \
 Při prvním startu API spustí migrace a založí admin účet podle `BOOTSTRAP_ADMIN_EMAIL` /
 `BOOTSTRAP_ADMIN_PASSWORD` (výchozí `admin@storage.local` / `admin12345`) — heslo hned změňte.
 
+Pro vývoj a CI lze volitelně nastavit `BOOTSTRAP_ACCESS_KEY_ID` (16–128 znaků `A-Z`, `0-9`) a
+`BOOTSTRAP_SECRET_ACCESS_KEY` (aspoň 32 znaků) — API při startu založí tento S3 klíč pro admin účet,
+takže cílová aplikace funguje bez ručních kroků. Obě proměnné se zadávají společně (jinak API
+nenastartuje); existující klíč (i smazaný či zakázaný) se nikdy nemění ani znovu neaktivuje.
+Vlastníkem je uživatel s `BOOTSTRAP_ADMIN_EMAIL` — pokud neexistuje (např. admin si po prvním startu
+změnil e-mail), klíč se nezaloží a API to zaloguje jako chybu. `.env.sample` má pro vývoj nastavenou
+výchozí dvojici. Klíč v prostředí je přihlašovací údaj — do produkce ho nepoužívejte.
+
 ## Další příkazy
 
 ```bash

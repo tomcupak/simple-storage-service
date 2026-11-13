@@ -1,3 +1,4 @@
+import { AccessKeysTypes } from '@storage/domains/access-keys/access-keys.types'
 import { ConfigProvider } from '@storage/domains/config/config.provider'
 
 export const config = {
@@ -44,4 +45,11 @@ export const config = {
 		email: process.env.BOOTSTRAP_ADMIN_EMAIL || 'admin@storage.local',
 		password: process.env.BOOTSTRAP_ADMIN_PASSWORD || 'admin12345',
 	},
+
+	/** Optional fixed S3 key for the bootstrap admin, so a dev/CI stack works with no manual step.
+	 *  Null when both variables are unset; an invalid or half-set pair throws at import. */
+	bootstrapAccessKey: AccessKeysTypes.parseBootstrapKey({
+		accessKeyId: process.env.BOOTSTRAP_ACCESS_KEY_ID,
+		secretAccessKey: process.env.BOOTSTRAP_SECRET_ACCESS_KEY,
+	}),
 }

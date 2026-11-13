@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common'
 import { DbProvider } from '@storage/database'
+import { AccessKeysService } from '@storage/domains/access-keys'
 import { UsersService } from '@storage/domains/users'
 import { sql } from 'drizzle-orm'
 
@@ -14,11 +15,16 @@ export class AppService {
 	constructor(
 		private db: DbProvider,
 		private usersService: UsersService,
+		private accessKeysService: AccessKeysService,
 	) {}
 
 	async onApplicationBootstrap() {
 		await this.testDb()
 		await this.usersService.bootstrapAdmin(config.bootstrapAdmin)
+
+		if (config.bootstrapAccessKey) {
+			await this.accessKeysService.ensureBootstrapKey({ ownerEmail: config.bootstrapAdmin.email, ...config.bootstrapAccessKey })
+		}
 
 		this.dbCheckInterval = setInterval(() => {
 			void this.testDb()

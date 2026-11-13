@@ -93,6 +93,22 @@ else
 	esac
 fi
 
+# Optional fixed S3 key for the bootstrap admin (dev/CI). Mirrors AccessKeysTypes.parseBootstrapKey:
+# both or neither, id 16-128 of A-Z0-9, secret at least 32 characters.
+key_id=${BOOTSTRAP_ACCESS_KEY_ID:-}
+key_secret=${BOOTSTRAP_SECRET_ACCESS_KEY:-}
+if [ -n "$key_id" ] || [ -n "$key_secret" ]; then
+	if [ -z "$key_id" ] || [ -z "$key_secret" ]; then
+		fail 'BOOTSTRAP_ACCESS_KEY_ID and BOOTSTRAP_SECRET_ACCESS_KEY must be set together'
+	else
+		case "$key_id" in
+			*[!A-Z0-9]*) fail 'BOOTSTRAP_ACCESS_KEY_ID must contain only A-Z and 0-9' ;;
+			*) { [ "${#key_id}" -ge 16 ] && [ "${#key_id}" -le 128 ]; } || fail "BOOTSTRAP_ACCESS_KEY_ID is ${#key_id} characters long, 16-128 are required" ;;
+		esac
+		[ "${#key_secret}" -ge 32 ] || fail "BOOTSTRAP_SECRET_ACCESS_KEY is ${#key_secret} characters long, at least 32 are required"
+	fi
+fi
+
 require_port WEB_PORT
 require_port API_PORT
 require_port S3_PORT

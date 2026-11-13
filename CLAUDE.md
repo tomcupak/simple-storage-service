@@ -393,6 +393,14 @@ The container refuses to boot without the values that have a working default in
 `storage-env-check` reports all of them at once and exits, and `S6_BEHAVIOUR_IF_STAGE2_FAILS=2`
 turns that into a container exit. A new must-have variable is added there, not in the app.
 
+`BOOTSTRAP_ACCESS_KEY_ID` / `BOOTSTRAP_SECRET_ACCESS_KEY` are an optional pair that makes `apps/api`
+create a fixed S3 key for the bootstrap admin (`AccessKeysService.ensureBootstrapKey`), for dev/CI
+stacks that need a known credential. It only ever inserts - an existing key, deleted or disabled
+included, is left as the admin made it (with a warning in the log). The owner is looked up by
+`BOOTSTRAP_ADMIN_EMAIL`; without such a user the key is skipped, not failed. The format rules live
+in `AccessKeysTypes.parseBootstrapKey` (the app config throws on a bad pair) and are mirrored in
+`storage-env-check`; keep the two in step.
+
 `docker/standalone/DOCKERHUB.md` is the image's Docker Hub page, published by
 `.github/workflows/release.yml` alongside the image it describes. It is the reference for the
 image's environment variables - a new knob in the standalone image belongs in that table and in
