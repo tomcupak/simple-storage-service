@@ -371,6 +371,11 @@ arch suffixes). The `build` stage is pinned to `$BUILDPLATFORM` because its outp
 architecture-neutral; only the runtime stages' installs run under QEMU, so keep anything
 arch-specific (native modules, downloaded binaries) out of `build` and in the runtime stages.
 
+OS packages are deliberately unpinned (`apk upgrade` + `apk add`), so security fixes arrive by
+rebuilding. The release therefore takes only the `build` stage from the GHA cache
+(`no-cache-filters` on the runtime target, `pull: true`): a cached `apk` layer is reused for as
+long as the base image digest stays the same and kept shipping the first build's Postgres.
+
 ## The standalone image
 
 `--target standalone` is the whole product in one container - both apps, the UI, Postgres and

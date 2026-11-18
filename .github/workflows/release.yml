@@ -67,7 +67,11 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          # The three targets share the `build` stage, so they also share its cache.
+          # The three targets share the `build` stage, so they also share its cache. The runtime
+          # stage itself is never taken from cache: its `apk upgrade` layer would otherwise be
+          # reused release after release and ship the OS packages of the first build, CVEs included.
+          pull: true
+          no-cache-filters: ${{ matrix.target }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -149,6 +153,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           # One manifest list per tag, not `-arm64` suffixes: `docker pull` picks the architecture.
           platforms: linux/amd64,linux/arm64
+          # Only the `build` stage comes from cache. The standalone stage installs Postgres, Valkey
+          # and nginx from apk, and a cached layer would keep shipping whatever versions the first
+          # build happened to get - a fresh `apk upgrade` on every release is the security update.
+          pull: true
+          no-cache-filters: standalone
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
